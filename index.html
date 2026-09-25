@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calling Portal</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');
+:root{
+  --bg:#f6f7f5; --panel:#ffffff; --panel-2:#f0f1ee; --line:#e2e4e0; --ink:#1b1f23; --ink-dim:#6b7280;
+  --blue:#2563eb; --teal:#0f9d68; --amber:#c2760a; --rose:#d5384f; --slate:#8b93a1; --purple:#7c3aed;
+}
+*{box-sizing:border-box;}
+body{margin:0; background:var(--bg); color:var(--ink); font-family:'Inter',system-ui,sans-serif; padding:28px 32px 60px;}
+h1,h2,h3{font-family:'Barlow Condensed','Arial Narrow',sans-serif; letter-spacing:0.01em; margin:0;}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;}
+button,select,input,textarea{font:inherit;}
+:focus-visible{outline:2px solid rgba(37,99,235,0.5); outline-offset:2px;}
+
+.topbar{display:flex; justify-content:space-between; align-items:flex-end; gap:16px; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:18px; margin-bottom:24px;}
+.topbar .eyebrow{color:var(--blue); text-transform:uppercase; font-size:11px; letter-spacing:0.16em; font-weight:600; margin-bottom:6px; font-family:'IBM Plex Mono',monospace;}
+.topbar h1{font-size:34px; font-weight:700;}
+.topbar .sub{color:var(--ink-dim); font-size:13.5px; margin-top:4px;}
+.topbar-right{display:flex; flex-direction:column; align-items:flex-end; gap:10px;}
+.rule-chip{font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:var(--ink-dim); border:1px solid var(--line); border-radius:20px; padding:7px 14px; background:var(--panel);}
+.rule-chip b{color:var(--ink); font-weight:600;}
+.rule-chip .r2{display:block; margin-top:3px;}
+
+.view-nav{display:flex; gap:6px; margin-bottom:22px; border-bottom:1px solid var(--line); overflow-x:auto;}
+.view-nav-btn{background:none; border:none; border-bottom:2px solid transparent; padding:10px 4px; margin-right:20px; font-family:'Barlow Condensed',sans-serif; font-size:16px; font-weight:600; color:var(--ink-dim); cursor:pointer; white-space:nowrap;}
+.view-nav-btn:hover{color:var(--ink);}
+.view-nav-btn.active{color:var(--ink); border-bottom-color:var(--blue);}
+.view-nav-btn .cnt{font-family:'IBM Plex Mono',monospace; font-size:11px; background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:1px 7px; margin-left:6px; color:var(--ink-dim);}
+
+.filters{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
+.filter-btn{font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--ink); border:1.5px solid #c7cac4; border-radius:20px; padding:7px 14px; background:var(--panel); cursor:pointer;}
+.filter-btn:hover{border-color:var(--blue);}
+.filter-btn.active{background:var(--ink); color:#fff; border-color:var(--ink); font-weight:600;}
+
+.summary-row{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:18px;}
+.total-card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px 16px;}
+.total-card .label{font-size:11px; text-transform:uppercase; letter-spacing:0.09em; color:var(--ink-dim); font-weight:600;}
+.total-card .value{font-family:'IBM Plex Mono',monospace; font-size:24px; font-weight:600; margin-top:4px;}
+.total-card .foot{font-size:11px; color:var(--ink-dim); margin-top:3px;}
+.pct-chip{font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; color:var(--teal); background:rgba(15,157,104,0.12); border-radius:8px; padding:2px 7px; vertical-align:middle;}
+
+.section{margin-bottom:26px;}
+.section-head{display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;}
+.section-head h2{font-size:19px; font-weight:600;}
+.note{font-size:12px; color:var(--ink-dim); font-family:'IBM Plex Mono',monospace;}
+
+.kpi-groups{display:grid; grid-template-columns:3fr 3fr 1fr; gap:14px;}
+.kpi-group .glabel{font-size:12px; color:var(--ink-dim); margin:0 0 6px 2px; font-weight:500;}
+.kpis{display:grid; gap:10px;}
+.kpis.k3{grid-template-columns:repeat(3,1fr);}
+.kpis.k1{grid-template-columns:1fr;}
+.kpi{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px 16px; cursor:pointer; text-align:left; display:flex; flex-direction:column; justify-content:flex-start; transition:box-shadow .15s, border-color .15s; width:100%;}
+.kpi:hover{box-shadow:0 2px 10px rgba(0,0,0,0.06);}
+.kpi.active-filter{border-color:currentColor; box-shadow:0 0 0 2px currentColor inset;}
+.kpi .label{font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--ink-dim); font-weight:600;}
+.kpi .value{font-family:'IBM Plex Mono',monospace; font-size:28px; font-weight:600; margin-top:6px;}
+.kpi .foot{font-size:11px; color:var(--ink-dim); margin-top:4px;}
+.kpi.c-amber{color:var(--amber);} .kpi.c-rose{color:var(--rose);} .kpi.c-deep{color:#9f1239;}
+.kpi.c-blue{color:var(--blue);} .kpi.c-teal{color:var(--teal);} .kpi.c-purple{color:var(--purple);}
+
+.tbl-wrap{background:var(--panel); border:1px solid var(--line); border-radius:14px; overflow:hidden;}
+.tbl-scroll{overflow-x:auto;}
+table{width:100%; border-collapse:collapse; font-size:13px;}
+th{text-align:left; font-family:'IBM Plex Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:0.07em; color:var(--ink-dim); font-weight:500; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--panel-2); white-space:nowrap;}
+td{padding:9px 14px; border-bottom:1px solid var(--line); vertical-align:top;}
+tr:last-child td{border-bottom:none;}
+td.num,th.num{font-family:'IBM Plex Mono',monospace; text-align:right;}
+.clickable-row{cursor:pointer;}
+.clickable-row:hover td{background:var(--panel-2);}
+.clickable-row .driver-name{color:var(--blue); text-decoration:underline dotted var(--blue); text-underline-offset:3px;}
+.clickable-row.tried td{opacity:0.62;}
+.driver-name{font-weight:500;}
+.driver-sub{color:var(--ink-dim); font-size:11px; font-family:'IBM Plex Mono',monospace;}
+.empty{padding:28px 20px; color:var(--ink-dim); font-size:13px; text-align:center;}
+
+.badge{font-family:'IBM Plex Mono',monospace; font-size:11px; padding:3px 9px; border-radius:20px; font-weight:500; display:inline-block; white-space:nowrap; margin:0 4px 3px 0;}
+.b-rent3{background:rgba(194,118,10,0.13); color:var(--amber);}
+.b-rent5{background:rgba(213,56,79,0.12); color:var(--rose);}
+.b-rent10{background:rgba(159,18,57,0.14); color:#9f1239;}
+.b-join{background:rgba(37,99,235,0.12); color:var(--blue);}
+.b-exit{background:rgba(124,58,237,0.12); color:var(--purple);}
+.b-ok{background:rgba(15,157,104,0.12); color:var(--teal);}
+.b-bad{background:rgba(213,56,79,0.12); color:var(--rose);}
+.b-wait{background:rgba(139,147,161,0.15); color:var(--slate);}
+
+.banner{border-radius:12px; padding:11px 16px; margin-bottom:14px; font-size:13px; border:1px solid;}
+.banner.warn{background:rgba(194,118,10,0.08); border-color:rgba(194,118,10,0.35); color:#7a4a06;}
+.banner.err{background:rgba(213,56,79,0.07); border-color:rgba(213,56,79,0.35); color:#8e1d2f;}
+.banner code{font-family:'IBM Plex Mono',monospace; font-size:12px;}
+
+.search{font-family:'IBM Plex Mono',monospace; font-size:12px; border:1.5px solid #c7cac4; border-radius:20px; padding:7px 14px; background:var(--panel); min-width:220px;}
+button.primary{background:var(--blue); color:#fff; border:none; border-radius:8px; padding:10px 18px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; font-weight:600; cursor:pointer;}
+button.primary:disabled{opacity:0.5; cursor:not-allowed;}
+button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(--line); border-radius:8px; padding:9px 16px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; cursor:pointer;}
+.status-msg{font-size:12px; font-family:'IBM Plex Mono',monospace; color:var(--ink-dim);}
+.status-msg.err{color:var(--rose);} .status-msg.ok{color:var(--teal);}
+
+/* modal */
+.modal-overlay{display:none; position:fixed; inset:0; background:rgba(20,22,20,0.45); z-index:100; align-items:flex-start; justify-content:center; padding:4vh 16px;}
+.modal-overlay.open{display:flex;}
+.modal-box{background:var(--panel); border-radius:16px; border:1px solid var(--line); width:min(880px,100%); max-height:92vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.25);}
+.modal-head{display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:18px 22px; border-bottom:1px solid var(--line);}
+.modal-head h3{font-size:22px; font-weight:600;}
+.modal-sub{font-size:12px; color:var(--ink-dim); font-family:'IBM Plex Mono',monospace; margin-top:3px;}
+.modal-close{background:var(--panel-2); border:1px solid var(--line); border-radius:8px; width:32px; height:32px; cursor:pointer; color:var(--ink-dim); font-size:16px; flex:none;}
+.modal-body{overflow-y:auto; padding:18px 22px 22px;}
+.call-btn{display:inline-block; margin-top:8px; background:var(--teal); color:#fff; text-decoration:none; border-radius:8px; padding:8px 14px; font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600;}
+.why{border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:14px; background:#fbfbfa;}
+.why-item{margin-bottom:8px; font-size:13px;}
+.why-item:last-child{margin-bottom:0;}
+.why-item .ask{color:var(--ink-dim); font-size:12.5px; margin-top:2px;}
+.facts{display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:12px; overflow:hidden; margin-bottom:14px;}
+.fact{background:var(--panel); padding:9px 12px;}
+.fact .k{font-size:10.5px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.07em; font-family:'IBM Plex Mono',monospace;}
+.fact .v{font-size:13.5px; margin-top:2px; font-weight:500;}
+.strip{border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:14px; overflow-x:auto;}
+.strip table{font-size:12px;}
+.strip td,.strip th{padding:3px 6px; border:none; background:none; text-align:center;}
+.strip td:first-child,.strip th:first-child{text-align:left; color:var(--ink-dim); font-family:'IBM Plex Mono',monospace; font-size:11px;}
+.mk-yes{color:var(--teal); font-weight:700;} .mk-no{color:var(--rose);} .mk-na{color:var(--slate);}
+.sub-h{font-family:'Barlow Condensed',sans-serif; font-size:16px; font-weight:600; margin:16px 0 8px;}
+.hist{font-size:12.5px;}
+.hist td{padding:6px 10px;}
+.log-form{border-top:2px solid var(--ink); margin-top:18px; padding-top:14px;}
+.form-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px 16px;}
+.field label{display:block; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--ink-dim); font-weight:600; margin-bottom:5px;}
+.field select,.field input[type=date],.field textarea{width:100%; border:1.5px solid #c7cac4; border-radius:8px; padding:8px 10px; background:var(--panel); font-size:13.5px;}
+.field textarea{min-height:70px; resize:vertical; font-family:'Inter',sans-serif;}
+.field.full{grid-column:1 / -1;}
+.seg{display:flex; gap:8px;}
+.seg button{flex:1; border:1.5px solid #c7cac4; background:var(--panel); border-radius:8px; padding:9px; cursor:pointer; font-weight:600;}
+.seg button.on{background:var(--ink); color:#fff; border-color:var(--ink);}
+.done-row{display:flex; align-items:center; gap:10px; font-size:13.5px; margin-top:4px;}
+.done-row input{width:18px; height:18px;}
+.form-actions{display:flex; align-items:center; gap:12px; margin-top:14px; flex-wrap:wrap;}
+
+.bars .bar-row{display:grid; grid-template-columns:200px 1fr 40px; gap:10px; align-items:center; font-size:12.5px; padding:5px 0;}
+.bar-bg{height:8px; background:#e6e8e4; border-radius:4px; overflow:hidden;}
+.bar-fill{height:100%; background:var(--blue);}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+.card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px 18px;}
+.card h3{font-size:17px; font-weight:600; margin-bottom:10px;}
+
+@media (max-width:1000px){
+  .kpi-groups{grid-template-columns:1fr;}
+  .grid2{grid-template-columns:1fr;}
+}
+@media (max-width:700px){
+  body{padding:16px 14px 50px;}
+  .summary-row{grid-template-columns:1fr 1fr;}
+  .topbar-right{align-items:flex-start;}
+  .facts{grid-template-columns:1fr 1fr;}
+  .form-grid{grid-template-columns:1fr;}
+  .bars .bar-row{grid-template-columns:120px 1fr 32px;}
+  .hide-sm{display:none;}
+  .modal-overlay{padding:0;}
+  .modal-box{max-height:100vh; height:100%; border-radius:0;}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none !important;}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Fleet Operations · Calling Team</div>
+    <h1>Calling Portal</h1>
+    <div class="sub" id="subLabel">Loading data…</div>
+  </div>
+  <div class="topbar-right">
+    <div class="filters" id="hubFilters"></div>
+    <div class="rule-chip">
+      <div>Rent not paid: <b>call at 3, 5 and 10 days</b> since last rent</div>
+      <div class="r2">New joiners: <b>call on day 3, 5 and 10</b>, day 1 = first rent paid</div>
+    </div>
+  </div>
+</div>
+
+<div class="view-nav">
+  <button class="view-nav-btn active" id="navQueue" onclick="setView('queue')">To call <span class="cnt" id="cntQueue">0</span></button>
+  <button class="view-nav-btn" id="navDone" onclick="setView('done')">Done <span class="cnt" id="cntDone">0</span></button>
+  <button class="view-nav-btn" id="navImpact" onclick="setView('impact')">Impact</button>
+</div>
+
+<div id="banners"></div>
+
+<div id="viewQueue">
+  <div class="summary-row" id="summaryRow"></div>
+  <div class="section">
+    <div class="section-head"><h2>Who to call</h2><span class="note">click a box to filter the list</span></div>
+    <div class="kpi-groups" id="catKpis"></div>
+  </div>
+  <div class="section">
+    <div class="section-head">
+      <h2 id="queueTitle">Call list</h2>
+      <div class="filters">
+        <input class="search" id="queueSearch" placeholder="Search name, ID or phone" oninput="renderQueueTable()">
+        <button class="filter-btn" onclick="refreshAll(true)">Refresh</button>
+      </div>
+    </div>
+    <div class="tbl-wrap"><div class="tbl-scroll" id="queueTable"></div></div>
+    <div class="note" style="margin-top:8px;">Drivers tried today without being marked done drop to the bottom, faded.</div>
+  </div>
+</div>
+
+<div id="viewDone" style="display:none;">
+  <div class="summary-row" id="doneSummary"></div>
+  <div class="section">
+    <div class="section-head">
+      <h2>Done calls</h2>
+      <div class="filters" id="doneFilters"></div>
+    </div>
+    <div class="tbl-wrap"><div class="tbl-scroll" id="doneTable"></div></div>
+  </div>
+</div>
+
+<div id="viewImpact" style="display:none;">
+  <div id="impactBody"></div>
+</div>
+
+<div class="modal-overlay" id="modal" onclick="if(event.target===this) closeModal()">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="mName">
+    <div class="modal-head">
+      <div>
+        <h3 id="mName"></h3>
+        <div class="modal-sub" id="mSub"></div>
+        <div id="mCall"></div>
+      </div>
+      <button class="modal-close" onclick="closeModal()" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="mBody"></div>
+  </div>
+</div>
+
+<script>
+// ===== Calling portal core. Pure functions only: no DOM, no network. =====
+// Rules are taken from the passenger dashboard so both sites agree:
+//   rent paid = a TOPUP row in the ledger; passenger = "Kadam Rental 3W Monthly..." payout model;
+//   driver id = the KDM id in brackets; DOJ = the ledger's own DOJ column (latest reading);
+//   a driver is gone after 7 full days with no rent.
+
+const DATA_START_DATE = '2026-07-12';
+const GONE_DAYS = 7;
+const RENT_TIERS = [3, 5, 10];       // days with no rent that trigger a call
+const RENT_MAX_DAYS = 30;            // past this a driver has left; not a check-up call any more
+const JOIN_TIERS = [3, 5, 10];       // feedback call on these days, day 1 = first rent paid
+const JOIN_LAST_DAY = 14;            // the day-10 call stays open until this day
+const JOIN_CONTINUED_DAY = 30;       // paid rent on or after day 30 = continued
+const EXIT_LOOKBACK_DAYS = 3;        // exit notices stay callable this many days past last working date
+
+const CALL_STATUSES = ['Connected', 'RNR', 'Switched off / not reachable', 'Busy / call back later', 'Wrong number'];
+const OUTCOMES = ['Coming back', 'Will pay rent today', 'On leave', 'Wants to exit / left', 'All good'];
+const REASONS = ['Vehicle issue', 'Charging issue', 'Low earnings', 'Health', 'Family / village',
+  'Joined another fleet or platform', 'Issue with hub staff', 'Other'];
+const CALLERS = ['Jyoti', 'Swati'];
+
+const HUBS = [
+  { key: 'rajeev-chowk', label: 'Rajeev Chowk (Sec 68)', short: 'Rajeev Chowk', payoutSuffixes: ['rajeev chowk'] },
+  { key: 'badshahpur', label: 'Badshahpur (Hero Honda, Sec 33)', short: 'Badshahpur', payoutSuffixes: ['', 'badshahpur'] },
+  { key: 'wazirabad', label: 'Wazirabad', short: 'Wazirabad', payoutSuffixes: ['wazirabad'] },
+];
+const PASSENGER_PAYOUT_PREFIX = /^kadam\s+rental\s+3w\s+monthly\b/i;
+
+// ---------- dates ----------
+function dateStrToUTC(s) { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d); }
+function utcToDateStr(ms) {
+  const d = new Date(ms);
+  return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+}
+function fmtDay(s) { if (!s) return ''; const [y, m, d] = s.split('-').map(Number); return d + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m - 1]; }
+function addDays(s, n) { return utcToDateStr(dateStrToUTC(s) + n * 86400000); }
+function daysBetween(a, b) { return Math.round((dateStrToUTC(b) - dateStrToUTC(a)) / 86400000); }
+function rangeDays(a, b) { const out = []; for (let ms = dateStrToUTC(a); ms <= dateStrToUTC(b); ms += 86400000) out.push(utcToDateStr(ms)); return out; }
+function istDateOf(isoOrMs) { const t = typeof isoOrMs === 'number' ? isoOrMs : Date.parse(isoOrMs); return utcToDateStr(t + 5.5 * 3600000); }
+// IST wall clock as a UTC-anchored number, the same convention the ledger's times use
+function istWallMs(isoOrMs) { const t = typeof isoOrMs === 'number' ? isoOrMs : Date.parse(isoOrMs); return t + 5.5 * 3600000; }
+
+// Same parser as the dashboard: literal ISO with no zone is read as its own digits.
+function parseAnyDate(s) {
+  if (s instanceof Date && !isNaN(s.getTime())) return s;
+  if (typeof s === 'number' && isFinite(s)) { const d = new Date(Math.round((s - 25569) * 86400000)); return isNaN(d.getTime()) ? null : d; }
+  if (!s || typeof s !== 'string' || !s.trim()) return null;
+  s = s.trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?)?\s*$/);
+  if (iso) {
+    const [, y, mo, da, hh, mi, se, fr] = iso;
+    return new Date(Date.UTC(+y, +mo - 1, +da, +(hh || 0), +(mi || 0), +(se || 0), fr ? Math.round(parseFloat('0.' + fr) * 1000) : 0));
+  }
+  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (dmy) { const [, d, mo, y, hh, mm, ss] = dmy; return new Date(Date.UTC(+y, +mo - 1, +d, +(hh || 0), +(mm || 0), +(ss || 0))); }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+function toDateStr(raw) { const d = parseAnyDate(raw); return d ? utcToDateStr(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())) : null; }
+
+// Ledger "Created At" arrives as a full date-time or as a bare 12-hour time ("01:07:18 PM").
+// Returns IST wall-clock ms for that transaction, or null if the time can't be read.
+function txnTimeMs(dateStr, createdAt) {
+  if (createdAt === null || createdAt === undefined || createdAt === '') return null;
+  if (typeof createdAt === 'number') {
+    if (createdAt > 0 && createdAt < 1) return dateStrToUTC(dateStr) + Math.round(createdAt * 86400000);
+    const d = parseAnyDate(createdAt); return d ? d.getTime() : null;
+  }
+  const s = String(createdAt).trim();
+  const t12 = s.match(/(?:^|\s)(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])$/);
+  if (t12) {
+    let h = +t12[1] % 12; if (/p/i.test(t12[4])) h += 12;
+    const datePart = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const base = datePart ? Date.UTC(+datePart[1], +datePart[2] - 1, +datePart[3]) : dateStrToUTC(dateStr);
+    return base + ((h * 60 + +t12[2]) * 60 + +(t12[3] || 0)) * 1000;
+  }
+  const d = parseAnyDate(s);
+  return d ? d.getTime() : null;
+}
+
+// ---------- ids, names, hubs ----------
+function driverIdOf(s) { const m = String(s || '').match(/\(([^)]+)\)/); return m ? m[1].trim() : String(s || '').trim(); }
+function driverNameOf(s) { return String(s || '').split('(')[0].trim(); }
+function normName(n) { return String(n || '').toLowerCase().trim().replace(/\s+/g, ' '); }
+function isPassengerPayout(p) { return PASSENGER_PAYOUT_PREFIX.test(String(p || '').trim()); }
+function hubKeyFromPayout(p) {
+  const t = String(p || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!PASSENGER_PAYOUT_PREFIX.test(t)) return null;
+  const suffix = t.replace(/^kadam\s+rental\s+3w\s+monthly\s*/, '').replace(/\s*-\s*gurgaon\s*$/, '').trim();
+  const hub = HUBS.find(h => h.payoutSuffixes.includes(suffix));
+  return hub ? hub.key : null;
+}
+function hubShort(key) { const h = HUBS.find(x => x.key === key); return h ? h.short : 'Hub not recognised'; }
+function numOrNull(v) { return (v === undefined || v === null || v === '' || isNaN(Number(v))) ? null : Number(v); }
+
+// ---------- building driver records ----------
+// ledgerBySnapshot: { 'YYYY-MM-DD': [ledger rows as stored by the dashboard] }
+function buildTxns(ledgerBySnapshot) {
+  const seen = new Set(); const txns = [];
+  Object.keys(ledgerBySnapshot).sort().forEach(snap => {
+    (ledgerBySnapshot[snap] || []).forEach(r => {
+      if (!r || !r.paymentType || !isPassengerPayout(r.payout)) return;
+      const date = toDateStr(r.createdDate);
+      if (!date) return;
+      const key = r.bizbmsTxnId || `${r.driver}|${date}|${r.paymentType}|${r.driverPaid}|${r.driverCharged}|${r.createdAt}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      txns.push({
+        date, id: driverIdOf(r.driver), name: driverNameOf(r.driver), type: r.paymentType,
+        paid: Number(r.driverPaid) || 0, ts: txnTimeMs(date, r.createdAt),
+        phone: r.phone ? String(r.phone).trim() : null, hub: hubKeyFromPayout(r.payout),
+        doj: toDateStr(r.doj), construct: r.sdConstruct ? String(r.sdConstruct).trim() : null,
+        rentBalance: numOrNull(r.rentBalance), sdBalance: numOrNull(r.sdBalance),
+      });
+    });
+  });
+  txns.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.ts || 0) - (b.ts || 0));
+  return txns;
+}
+
+function buildDrivers(txns) {
+  const D = {};
+  txns.forEach(t => {
+    const d = D[t.id] || (D[t.id] = { id: t.id, name: t.name, phone: null, hub: null, doj: null, construct: null,
+      topups: [], topupDates: [], rentBalance: null, sdBalance: null, balanceDate: null });
+    if (t.name) d.name = t.name;          // txns are in time order, so the latest reading wins
+    if (t.phone) d.phone = t.phone;
+    if (t.hub) d.hub = t.hub;
+    if (t.doj) d.doj = t.doj;
+    if (t.construct) d.construct = t.construct;
+    if (t.rentBalance !== null) d.rentBalance = t.rentBalance;
+    if (t.sdBalance !== null && t.type !== 'JOINING_FEE') d.sdBalance = t.sdBalance;
+    if (t.type === 'TOPUP') {
+      d.topups.push({ date: t.date, ts: t.ts, paid: t.paid });
+      if (d.topupDates[d.topupDates.length - 1] !== t.date) d.topupDates.push(t.date);
+    }
+  });
+  Object.values(D).forEach(d => {
+    d.lastTopup = d.topupDates.length ? d.topupDates[d.topupDates.length - 1] : null;
+    d.firstRentDay = d.doj ? (d.topupDates.find(x => x >= d.doj) || null) : null;
+  });
+  return D;
+}
+
+// sessionsBySnapshot: { date: [session rows] } for recent days only
+function buildSessions(sessionsBySnapshot) {
+  const S = {};
+  Object.keys(sessionsBySnapshot).sort().forEach(snap => {
+    (sessionsBySnapshot[snap] || []).forEach(r => {
+      if (!r || !r.driver || !isPassengerPayout(r.payout)) return;
+      const id = driverIdOf(r.driver);
+      const date = toDateStr(r.started) || snap;
+      const s = S[id] || (S[id] = { dates: new Set(), lastDate: null, lastVehicle: null });
+      s.dates.add(date);
+      if (!s.lastDate || date >= s.lastDate) { s.lastDate = date; if (r.vehicle) s.lastVehicle = String(r.vehicle).trim(); }
+    });
+  });
+  return S;
+}
+
+// Leave and exit files name drivers, sometimes with an FE id. The id wins when it maps to a
+// known KDM id; otherwise the name, and only when exactly one driver has it.
+function makeMatcher(drivers) {
+  const byName = {};
+  Object.values(drivers).forEach(d => { const k = normName(d.name); (byName[k] = byName[k] || []).push(d.id); });
+  return function match(feId, name) {
+    const raw = String(feId || '').trim();
+    if (raw) {
+      const cand = /^\d+$/.test(raw) ? 'KDM' + raw.padStart(7, '0') : raw.toUpperCase();
+      if (drivers[cand]) return { id: cand, how: 'id' };
+    }
+    const ids = byName[normName(name)] || [];
+    if (ids.length === 1) return { id: ids[0], how: 'name' };
+    if (ids.length > 1) return { id: null, how: 'ambiguous', count: ids.length };
+    return { id: null, how: 'none' };
+  };
+}
+
+function tierFor(value, tiers) { let t = null; tiers.forEach(x => { if (value >= x) t = x; }); return t; }
+
+// ---------- the queue ----------
+// ctx: { drivers, sessions, leaves, exits, logs, today, ref }
+function buildItems(ctx) {
+  const { drivers, exits, today, ref } = ctx;
+  const items = [];
+  Object.values(drivers).forEach(d => {
+    // rent not paid: full days since the last rent payment, counted to the last ledger date
+    if (d.lastTopup) {
+      const gap = daysBetween(d.lastTopup, ref);
+      if (gap >= RENT_TIERS[0] && gap <= RENT_MAX_DAYS) {
+        const tier = tierFor(gap, RENT_TIERS);
+        items.push({ key: `rent|${d.id}|${d.lastTopup}|${tier}`, cat: 'rent', tier, driverId: d.id,
+          anchor: d.lastTopup, detail: `No rent for ${gap} day${gap === 1 ? '' : 's'} (last paid ${fmtDay(d.lastTopup)})`, gap });
+      }
+    }
+    // new joiner feedback: day 1 is the first day they paid rent
+    if (d.doj && d.firstRentDay && d.doj >= DATA_START_DATE) {
+      const dayNum = daysBetween(d.firstRentDay, today) + 1;
+      if (dayNum >= JOIN_TIERS[0] && dayNum <= JOIN_LAST_DAY) {
+        const tier = tierFor(dayNum, JOIN_TIERS);
+        items.push({ key: `join|${d.id}|${d.firstRentDay}|${tier}`, cat: 'join', tier, driverId: d.id,
+          anchor: d.firstRentDay, detail: `Day ${tier} feedback (today is day ${dayNum}, day 1 was ${fmtDay(d.firstRentDay)})`, dayNum });
+      }
+    }
+  });
+  // exit notices still worth a retention call
+  const match = makeMatcher(drivers);
+  (exits || []).forEach(e => {
+    if (!e || !e.lastWorkingDate) return;
+    if (/reject|withdraw|cancel/i.test(e.status || '')) return;
+    if (e.lastWorkingDate < addDays(today, -EXIT_LOOKBACK_DAYS)) return;
+    const m = match(e.driverFeId, e.driverName);
+    const who = m.id || ('name:' + normName(e.driverName));
+    items.push({ key: `exit|${who}|${e.lastWorkingDate}`, cat: 'exit', tier: null, driverId: m.id,
+      unmatchedName: m.id ? null : e.driverName, matchHow: m.how,
+      anchor: e.lastWorkingDate, detail: `Exit notice, last working day ${fmtDay(e.lastWorkingDate)}` +
+        (e.noticeReason ? `. Reason given: ${e.noticeReason}` : '') + (e.status ? ` (${e.status})` : ''),
+      exit: e });
+  });
+  return items;
+}
+
+function logsByItem(logs) {
+  const m = {};
+  (logs || []).slice().sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)).forEach(l => {
+    (l.item_keys || []).forEach(k => { (m[k] = m[k] || []).push(l); });
+  });
+  return m;
+}
+
+const CAT_RANK = { rent: 3, exit: 2, join: 1 };
+function itemScore(it) {
+  if (it.cat === 'rent') return 300 + it.tier * 10 + Math.min(it.gap, 30);
+  if (it.cat === 'exit') return 250;
+  return 100 + it.tier;
+}
+
+function buildQueue(ctx) {
+  const items = buildItems(ctx);
+  const byItem = logsByItem(ctx.logs);
+  const open = items.filter(it => !(byItem[it.key] || []).some(l => l.done));
+  const rows = {};
+  open.forEach(it => {
+    const rk = it.driverId || ('name:' + normName(it.unmatchedName));
+    const r = rows[rk] || (rows[rk] = { rowKey: rk, driverId: it.driverId, name: null, items: [], attempts: [] });
+    r.items.push(it);
+    (byItem[it.key] || []).forEach(l => { if (!r.attempts.includes(l)) r.attempts.push(l); });
+  });
+  const list = Object.values(rows).map(r => {
+    const d = r.driverId ? ctx.drivers[r.driverId] : null;
+    r.name = d ? d.name : r.items[0].unmatchedName;
+    r.hub = d ? d.hub : null;
+    r.phone = d ? d.phone : null;
+    r.items.sort((a, b) => itemScore(b) - itemScore(a));
+    r.attempts.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+    r.lastAttempt = r.attempts[r.attempts.length - 1] || null;
+    r.triedToday = !!(r.lastAttempt && istDateOf(r.lastAttempt.created_at) === ctx.today);
+    r.score = itemScore(r.items[0]);
+    return r;
+  });
+  list.sort((a, b) => (a.triedToday - b.triedToday) || (b.score - a.score) || String(a.name).localeCompare(String(b.name)));
+  return { rows: list, items, byItem };
+}
+
+// ---------- results: did the call help? ----------
+function firstTopupAfter(d, callIso) {
+  if (!d) return null;
+  const cDate = istDateOf(callIso), cWall = istWallMs(callIso);
+  return d.topups.find(t => t.date > cDate || (t.date === cDate && t.ts !== null && t.ts > cWall)) || null;
+}
+
+function parseItemKey(k) {
+  const p = k.split('|');
+  return { cat: p[0], who: p[1], anchor: p[2], tier: p[3] ? Number(p[3]) : null };
+}
+
+// The result of one called item, judged against the ledger. refIso = time of the call used.
+function itemResult(key, callIso, ctx) {
+  const pk = parseItemKey(key);
+  const id = pk.who.startsWith('name:') ? null : pk.who;
+  const d = id ? ctx.drivers[id] : null;
+  if (pk.cat === 'rent') {
+    const t = firstTopupAfter(d, callIso);
+    if (t) return { state: 'back', label: `Came back ${fmtDay(t.date)}`, daysToReturn: daysBetween(istDateOf(callIso), t.date) };
+    return { state: 'notyet', label: 'Not back yet' };
+  }
+  if (pk.cat === 'join') {
+    const day30 = addDays(pk.anchor, JOIN_CONTINUED_DAY - 1);
+    if (d && d.lastTopup && d.lastTopup >= day30) return { state: 'continued', label: 'Continued past day 30' };
+    const idle = d && d.lastTopup ? daysBetween(d.lastTopup, ctx.ref) : null;
+    if (idle !== null && idle >= GONE_DAYS) return { state: 'dropped', label: `Dropped (no rent since ${fmtDay(d.lastTopup)})` };
+    return { state: 'pending', label: `Day 30 is ${fmtDay(day30)}` };
+  }
+  if (pk.cat === 'exit') {
+    if (d && d.lastTopup && d.lastTopup > pk.anchor) return { state: 'stayed', label: `Stayed (paid rent ${fmtDay(d.lastTopup)})` };
+    if (ctx.ref > pk.anchor) return { state: 'left', label: 'Left' };
+    return { state: 'pending', label: 'Notice still running' };
+  }
+  return { state: 'unknown', label: '' };
+}
+
+// Every item that has ever been called, with its done call (or latest attempt) and result
+function calledItems(ctx) {
+  const byItem = logsByItem(ctx.logs);
+  return Object.keys(byItem).map(key => {
+    const logs = byItem[key];
+    const doneLog = logs.find(l => l.done) || null;
+    const last = logs[logs.length - 1];
+    const basis = doneLog || last;
+    const pk = parseItemKey(key);
+    const id = pk.who.startsWith('name:') ? null : pk.who;
+    const d = id ? ctx.drivers[id] : null;
+    const reached = logs.some(l => l.call_status === 'Connected');
+    return {
+      key, cat: pk.cat, tier: pk.tier, anchor: pk.anchor, driverId: id,
+      name: d ? d.name : (basis.driver_name || pk.who.replace(/^name:/, '')), hub: d ? d.hub : null,
+      done: !!doneLog, log: basis, attempts: logs.length, reached,
+      result: itemResult(key, basis.created_at, ctx),
+    };
+  });
+}
+
+function rate(n, d) { return d ? Math.round((n / d) * 1000) / 10 : null; }
+
+function impactSummary(ctx) {
+  const called = calledItems(ctx);
+  const grp = (list, okStates, decidedStates) => {
+    const out = {};
+    ['reached', 'notReached'].forEach(g => {
+      const sub = list.filter(x => (g === 'reached') === x.reached);
+      const decided = decidedStates ? sub.filter(x => decidedStates.includes(x.result.state)) : sub;
+      const ok = sub.filter(x => okStates.includes(x.result.state));
+      out[g] = { total: sub.length, decided: decided.length, ok: ok.length, rate: rate(ok.length, decided.length) };
+    });
+    return out;
+  };
+  const rent = called.filter(x => x.cat === 'rent');
+  const byTier = {};
+  RENT_TIERS.forEach(t => { byTier[t] = grp(rent.filter(x => x.tier === t), ['back']); });
+  const backDays = rent.filter(x => x.reached && x.result.state === 'back').map(x => x.result.daysToReturn).sort((a, b) => a - b);
+  const median = backDays.length ? backDays[Math.floor((backDays.length - 1) / 2)] : null;
+
+  const connectedLogs = (ctx.logs || []).filter(l => l.call_status === 'Connected');
+  const reasons = {}; REASONS.forEach(r => { reasons[r] = 0; });
+  connectedLogs.forEach(l => { if (l.reason) reasons[l.reason] = (reasons[l.reason] || 0) + 1; });
+  const outcomes = {}; OUTCOMES.forEach(o => { outcomes[o] = 0; });
+  connectedLogs.forEach(l => { if (l.outcome) outcomes[l.outcome] = (outcomes[l.outcome] || 0) + 1; });
+
+  const callers = {};
+  CALLERS.forEach(c => { callers[c] = { calls: 0, connected: 0, today: 0, done: 0 }; });
+  (ctx.logs || []).forEach(l => {
+    const c = callers[l.caller] || (callers[l.caller] = { calls: 0, connected: 0, today: 0, done: 0 });
+    c.calls++; if (l.call_status === 'Connected') c.connected++;
+    if (l.done) c.done++;
+    if (istDateOf(l.created_at) === ctx.today) c.today++;
+  });
+
+  return {
+    rent: grp(rent, ['back']), rentByTier: byTier, medianDaysToReturn: median,
+    join: grp(called.filter(x => x.cat === 'join'), ['continued'], ['continued', 'dropped']),
+    exit: grp(called.filter(x => x.cat === 'exit'), ['stayed'], ['stayed', 'left']),
+    reasons, outcomes, callers, totalCalls: (ctx.logs || []).length,
+  };
+}
+
+// Leaves on file that touch the window from ref onwards, for the call sheet
+function leavesFor(driverId, name, ctx) {
+  const match = makeMatcher(ctx.drivers);
+  return (ctx.leaves || []).filter(l => {
+    if (!l || !l.endDate || l.endDate < addDays(ctx.ref, -14)) return false;
+    const m = match(l.driverFeId, l.driverName);
+    return driverId ? m.id === driverId : normName(l.driverName) === normName(name);
+  });
+}
+
+if (typeof module !== 'undefined') module.exports = {
+  DATA_START_DATE, RENT_TIERS, JOIN_TIERS, CALL_STATUSES, OUTCOMES, REASONS, CALLERS, HUBS,
+  addDays, daysBetween, rangeDays, istDateOf, istWallMs, parseAnyDate, toDateStr, txnTimeMs, driverIdOf, hubKeyFromPayout,
+  buildTxns, buildDrivers, buildSessions, makeMatcher, buildItems, buildQueue, calledItems, itemResult,
+  impactSummary, leavesFor, logsByItem, hubShort,
+};
+
+</script>
+<script>
+// ===== UI =====
+const SUPABASE_URL = 'https://lplxkdjqivknvhmtmdux.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_e6t8GrHCcaMyBJMoBZydSg_Ot8fi551';
+const CALLS_TABLE = 'calling_portal_calls';
+const LEAVE_KEY = '1900-01-06', EXIT_KEY = '1900-01-07';
+const SESSION_DAYS = 14;
+
+let sb = null;
+try { sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null; } catch (e) { sb = null; }
+
+const S = {
+  drivers: {}, sessions: {}, leaves: [], exits: [], logs: [], today: null, ref: null,
+  leaveUploadedAt: null, tableMissing: false, loadError: null,
+  view: 'queue', catFilter: null, hub: null, doneCat: null, doneCaller: null, current: null,
+};
+
+function esc(s) { return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function todayIST() {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const g = t => p.find(x => x.type === t).value;
+  return `${g('year')}-${g('month')}-${g('day')}`;
+}
+function shortDate(s) { if (!s) return '-'; const [y, m, d] = s.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'UTC' }); }
+function callTime(iso) { return new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }); }
+function money(v) { return v === null || v === undefined ? '-' : '₹' + Number(v).toLocaleString('en-IN'); }
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+function ctx() { return { drivers: S.drivers, sessions: S.sessions, leaves: S.leaves, exits: S.exits, logs: S.logs, today: S.today, ref: S.ref }; }
+function hubOk(hubKey) { return !S.hub || hubKey === S.hub; }
+
+// ---------- loading ----------
+async function fetchInChunks(dates, cols) {
+  const out = [];
+  for (let i = 0; i < dates.length; i += 12) {
+    const { data, error } = await sb.from('dashboard_snapshots').select(cols).in('snapshot_date', dates.slice(i, i + 12));
+    if (error) throw error;
+    out.push(...(data || []));
+  }
+  return out;
+}
+
+async function loadData() {
+  S.today = todayIST();
+  const yesterday = addDays(S.today, -1);
+  const { data: dateRows, error } = await sb.from('dashboard_snapshots').select('snapshot_date').gte('snapshot_date', DATA_START_DATE).lte('snapshot_date', yesterday);
+  if (error) throw error;
+  const dates = (dateRows || []).map(r => r.snapshot_date).sort();
+  const ledgerRows = await fetchInChunks(dates, 'snapshot_date, ledger_payload');
+  const ledgerBySnap = {};
+  ledgerRows.forEach(r => { if (r.ledger_payload && r.ledger_payload.length) ledgerBySnap[r.snapshot_date] = r.ledger_payload; });
+  const withLedger = Object.keys(ledgerBySnap).sort();
+  S.ref = withLedger.length ? withLedger[withLedger.length - 1] : yesterday;
+  const txns = buildTxns(ledgerBySnap);
+  S.drivers = buildDrivers(txns);
+  const recent = dates.filter(d => d > addDays(S.ref, -SESSION_DAYS));
+  const sessRows = await fetchInChunks(recent, 'snapshot_date, payload');
+  const sessBySnap = {}; sessRows.forEach(r => { sessBySnap[r.snapshot_date] = r.payload || []; });
+  S.sessions = buildSessions(sessBySnap);
+  const { data: side } = await sb.from('dashboard_snapshots').select('snapshot_date, payload, created_at').in('snapshot_date', [LEAVE_KEY, EXIT_KEY]);
+  (side || []).forEach(r => {
+    if (r.snapshot_date === LEAVE_KEY) { S.leaves = r.payload || []; S.leaveUploadedAt = r.created_at; }
+    if (r.snapshot_date === EXIT_KEY) { S.exits = r.payload || []; }
+  });
+}
+
+async function loadLogs() {
+  const { data, error } = await sb.from(CALLS_TABLE).select('*').order('created_at', { ascending: true }).limit(10000);
+  if (error) {
+    if (/does not exist|relation|schema cache|not find/i.test(error.message || '') || error.code === '42P01' || error.code === 'PGRST205') { S.tableMissing = true; S.logs = []; return; }
+    throw error;
+  }
+  S.tableMissing = false;
+  S.logs = data || [];
+}
+
+async function refreshAll(manual) {
+  if (!sb) { S.loadError = 'The database library did not load. Check the internet connection and reload.'; renderAll(); return; }
+  document.getElementById('subLabel').textContent = manual ? 'Refreshing…' : 'Loading data…';
+  try {
+    await loadData();
+    await loadLogs();
+    S.loadError = null;
+  } catch (e) {
+    console.error(e);
+    S.loadError = 'Could not load from the database: ' + (e.message || e);
+  }
+  renderAll();
+}
+
+// ---------- rendering ----------
+function renderAll() {
+  const sub = document.getElementById('subLabel');
+  if (S.ref) {
+    const leave = S.leaveUploadedAt ? ` · leave and exit file uploaded ${shortDate(istDateOf(S.leaveUploadedAt))}` : '';
+    sub.textContent = `Rent data up to ${shortDate(S.ref)}${leave}`;
+  }
+  renderHubFilters();
+  renderBanners();
+  renderQueue();
+  renderDone();
+  renderImpact();
+  if (S.current) renderModal();
+}
+
+function renderBanners() {
+  const b = [];
+  if (S.loadError) b.push(`<div class="banner err">${esc(S.loadError)}</div>`);
+  if (S.tableMissing) b.push(`<div class="banner err">Calls can't be saved yet: the <code>${CALLS_TABLE}</code> table doesn't exist. Run <code>calling_portal_calls.sql</code> once in Supabase (SQL Editor, paste, Run), then reload.</div>`);
+  if (S.ref && S.today && daysBetween(S.ref, S.today) > 1) b.push(`<div class="banner warn">The latest ledger upload is for ${shortDate(S.ref)}. Days without rent are counted to that date, so a driver who paid since then may still be listed.</div>`);
+  document.getElementById('banners').innerHTML = b.join('');
+}
+
+function renderHubFilters() {
+  const btn = (key, label) => `<button class="filter-btn ${S.hub === key ? 'active' : ''}" onclick="setHub(${key ? `'${key}'` : 'null'})">${esc(label)}</button>`;
+  document.getElementById('hubFilters').innerHTML = btn(null, 'All hubs') + HUBS.map(h => btn(h.key, h.short)).join('');
+}
+function setHub(k) { S.hub = k; renderAll(); }
+
+function setView(v) {
+  S.view = v;
+  ['queue', 'done', 'impact'].forEach(x => {
+    document.getElementById('view' + x[0].toUpperCase() + x.slice(1)).style.display = x === v ? '' : 'none';
+    document.getElementById('nav' + x[0].toUpperCase() + x.slice(1)).classList.toggle('active', x === v);
+  });
+}
+
+function itemBadge(it) {
+  if (it.cat === 'rent') return `<span class="badge b-rent${it.tier}">Rent ${it.tier}+ days</span>`;
+  if (it.cat === 'join') return `<span class="badge b-join">New joiner day ${it.tier}</span>`;
+  if (it.cat === 'exit') return `<span class="badge b-exit">Exit notice</span>`;
+  return '';
+}
+function keyBadge(cat, tier) { return itemBadge({ cat, tier }); }
+function itemLabel(it) {
+  if (it.cat === 'rent') return `Rent not paid ${it.tier}+ days`;
+  if (it.cat === 'join') return `New joiner day ${it.tier}`;
+  return 'Exit notice';
+}
+
+function queueRows() {
+  const q = buildQueue(ctx());
+  return q.rows.filter(r => hubOk(r.hub));
+}
+
+function renderQueue() {
+  const rows = queueRows();
+  document.getElementById('cntQueue').textContent = rows.length;
+  const logsToday = S.logs.filter(l => istDateOf(l.created_at) === S.today && hubOk(l.hub));
+  const conToday = logsToday.filter(l => l.call_status === 'Connected').length;
+  const doneAll = calledItems(ctx()).filter(x => x.done && hubOk(x.hub)).length;
+  const byCaller = CALLERS.map(c => `${c} ${logsToday.filter(l => l.caller === c).length}`).join(', ');
+  const pct = logsToday.length ? ` <span class="pct-chip">${Math.round(conToday / logsToday.length * 100)}%</span>` : '';
+  document.getElementById('summaryRow').innerHTML = `
+    <div class="total-card"><div class="label">To call</div><div class="value">${rows.length}</div><div class="foot">drivers with an open call</div></div>
+    <div class="total-card"><div class="label">Calls made today</div><div class="value">${logsToday.length}</div><div class="foot">${esc(byCaller)}</div></div>
+    <div class="total-card"><div class="label">Connected today</div><div class="value">${conToday}${pct}</div><div class="foot">of calls made today</div></div>
+    <div class="total-card"><div class="label">Done, all time</div><div class="value">${doneAll}</div><div class="foot">calls closed, see Done tab</div></div>`;
+
+  const count = (cat, tier) => rows.filter(r => r.items.some(i => i.cat === cat && (tier === null || i.tier === tier))).length;
+  const card = (cat, tier, label, foot, cls) => {
+    const on = S.catFilter && S.catFilter.cat === cat && S.catFilter.tier === tier;
+    return `<button class="kpi ${cls} ${on ? 'active-filter' : ''}" onclick="setCat('${cat}', ${tier === null ? 'null' : tier})">
+      <div class="label">${esc(label)}</div><div class="value">${count(cat, tier)}</div><div class="foot">${esc(foot)}</div></button>`;
+  };
+  document.getElementById('catKpis').innerHTML = `
+    <div class="kpi-group"><div class="glabel">Rent not paid</div><div class="kpis k3">
+      ${card('rent', 3, '3 days', '3 to 4 days', 'c-amber')}
+      ${card('rent', 5, '5 days', '5 to 9 days', 'c-rose')}
+      ${card('rent', 10, '10 days', '10 to 30 days', 'c-deep')}
+    </div></div>
+    <div class="kpi-group"><div class="glabel">New joiner feedback</div><div class="kpis k3">
+      ${card('join', 3, 'Day 3', 'open on day 3 and 4', 'c-blue')}
+      ${card('join', 5, 'Day 5', 'open day 5 to 9', 'c-blue')}
+      ${card('join', 10, 'Day 10', 'open day 10 to 14', 'c-blue')}
+    </div></div>
+    <div class="kpi-group"><div class="glabel">Retention</div><div class="kpis k1">
+      ${card('exit', null, 'Exit notice', 'before last working day', 'c-purple')}
+    </div></div>`;
+  renderQueueTable();
+}
+
+function setCat(cat, tier) {
+  S.catFilter = (S.catFilter && S.catFilter.cat === cat && S.catFilter.tier === tier) ? null : { cat, tier };
+  renderQueue();
+}
+
+function renderQueueTable() {
+  let rows = queueRows();
+  if (S.catFilter) rows = rows.filter(r => r.items.some(i => i.cat === S.catFilter.cat && (S.catFilter.tier === null || i.tier === S.catFilter.tier)));
+  const qv = (document.getElementById('queueSearch').value || '').trim().toLowerCase();
+  if (qv) rows = rows.filter(r => [r.name, r.driverId, r.phone].some(x => String(x || '').toLowerCase().includes(qv)));
+  document.getElementById('queueTitle').innerHTML = S.catFilter
+    ? `Call list: ${esc(itemLabel(S.catFilter))} <button class="filter-btn" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="S.catFilter=null; renderQueue();">Show all</button>`
+    : 'Call list';
+  S.queueOrder = rows.map(r => r.rowKey);
+  const el = document.getElementById('queueTable');
+  if (!rows.length) {
+    el.innerHTML = `<div class="empty">${S.ref ? 'Nobody to call here right now.' : 'Waiting for data.'}</div>`;
+    return;
+  }
+  el.innerHTML = `<table><thead><tr><th>Driver</th><th class="hide-sm">Hub</th><th>Phone</th><th>Why call</th><th class="hide-sm">Last rent</th><th>Tries</th><th class="hide-sm">Last try</th></tr></thead><tbody>` +
+    rows.map(r => {
+      const d = r.driverId ? S.drivers[r.driverId] : null;
+      const last = r.lastAttempt;
+      return `<tr class="clickable-row ${r.triedToday ? 'tried' : ''}" onclick="openRow('${esc(r.rowKey)}')">
+        <td><div class="driver-name">${esc(r.name)}</div><div class="driver-sub">${esc(r.driverId || 'not matched to ledger')}</div></td>
+        <td class="hide-sm">${esc(r.hub ? hubShort(r.hub) : '-')}</td>
+        <td class="mono" style="font-size:12px;">${esc(r.phone || '-')}</td>
+        <td>${r.items.map(itemBadge).join('')}</td>
+        <td class="hide-sm mono" style="font-size:12px;">${d && d.lastTopup ? shortDate(d.lastTopup) : '-'}</td>
+        <td class="num">${r.attempts.length}</td>
+        <td class="hide-sm" style="font-size:12px;">${last ? `${esc(last.call_status)}<div class="driver-sub">${esc(last.caller)}, ${callTime(last.created_at)}</div>` : '<span class="driver-sub">not called</span>'}</td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+// ---------- call sheet ----------
+function openRow(rowKey) {
+  S.current = { rowKey, form: { caller: lsGet('portalCaller') || '', status: '', outcome: '', reason: '', comeback: '', comment: '', done: false }, msg: '' };
+  renderModal();
+  document.getElementById('modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeModal() {
+  S.current = null;
+  document.getElementById('modal').classList.remove('open');
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.current) closeModal(); });
+
+const ASK = {
+  rent: 'Ask why rent has not been paid, whether anything is wrong (vehicle, hub, earnings, health), and when they will be back.',
+  join: 'Ask how the first days went: vehicle, hub, earnings, Rapido rides, and anything that is bothering them.',
+  exit: 'Ask why they are leaving and whether anything would make them stay.',
+};
+
+function renderModal() {
+  const cur = S.current; if (!cur) return;
+  const q = buildQueue(ctx());
+  let row = q.rows.find(r => r.rowKey === cur.rowKey);
+  if (!row && cur.lastRow) row = cur.lastRow;
+  if (!row) { closeModal(); return; }
+  cur.lastRow = row;
+  const d = row.driverId ? S.drivers[row.driverId] : null;
+  const ses = row.driverId ? S.sessions[row.driverId] : null;
+  document.getElementById('mName').textContent = row.name || 'Unknown driver';
+  document.getElementById('mSub').textContent = [row.driverId || 'Not matched to the ledger', row.hub ? hubShort(row.hub) : null, row.phone].filter(Boolean).join(' · ');
+  document.getElementById('mCall').innerHTML = row.phone ? `<a class="call-btn" href="tel:${esc(String(row.phone).replace(/[^\d+]/g, ''))}">Call ${esc(row.phone)}</a>` : '';
+
+  const why = row.items.map(it => `<div class="why-item">${itemBadge(it)} ${esc(it.detail)}${it.matchHow === 'ambiguous' ? ' <span class="badge b-bad">name shared by several drivers, check who this is</span>' : ''}${it.matchHow === 'none' ? ' <span class="badge b-wait">name not found in ledger</span>' : ''}<div class="ask">${esc(ASK[it.cat])}</div></div>`).join('');
+
+  const gap = d && d.lastTopup ? daysBetween(d.lastTopup, S.ref) : null;
+  const dayNum = d && d.firstRentDay ? daysBetween(d.firstRentDay, S.today) + 1 : null;
+  const facts = d ? [
+    ['Joined (DOJ)', d.doj ? shortDate(d.doj) : '-'],
+    ['First rent paid', d.firstRentDay ? `${shortDate(d.firstRentDay)}${dayNum && dayNum <= 60 ? ` (today is day ${dayNum})` : ''}` : '-'],
+    ['Last rent paid', d.lastTopup ? `${shortDate(d.lastTopup)}${gap !== null ? ` (${gap} day${gap === 1 ? '' : 's'} ago)` : ''}` : 'Never'],
+    ['Rent balance (BMS)', money(d.rentBalance)],
+    ['SD balance (BMS)', money(d.sdBalance)],
+    ['SD construct', d.construct || '-'],
+    ['Last check-in', ses && ses.lastDate ? shortDate(ses.lastDate) : `none in last ${SESSION_DAYS} days`],
+    ['Last vehicle', ses && ses.lastVehicle ? ses.lastVehicle : '-'],
+    ['Rent days paid, last 14', String(d.topupDates.filter(x => x > addDays(S.ref, -14)).length)],
+  ] : [];
+  const factsHtml = facts.length ? `<div class="facts">${facts.map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('')}</div>` : '';
+
+  let strip = '';
+  if (d) {
+    const days = rangeDays(addDays(S.ref, -13), S.ref);
+    const paid = new Set(d.topupDates);
+    const inDays = ses ? ses.dates : new Set();
+    const mk = (on) => on ? '<span class="mk-yes" aria-label="yes">✓</span>' : '<span class="mk-no" aria-label="no">✗</span>';
+    strip = `<div class="strip"><table><thead><tr><th></th>${days.map(x => `<th class="mono" style="font-size:10px;">${shortDate(x).replace(' ', '<br>')}</th>`).join('')}</tr></thead><tbody>
+      <tr><td>Rent paid</td>${days.map(x => `<td>${mk(paid.has(x))}</td>`).join('')}</tr>
+      <tr><td>Checked in</td>${days.map(x => `<td>${mk(inDays.has(x))}</td>`).join('')}</tr></tbody></table></div>`;
+  }
+
+  const leaves = leavesFor(row.driverId, row.name, ctx());
+  const leaveHtml = leaves.length ? `<div class="sub-h">Leave on file</div><div class="tbl-wrap"><table class="hist"><tbody>${leaves.map(l => `<tr><td>${shortDate(l.startDate)} to ${shortDate(l.endDate)}</td><td>${esc(l.reason || '')}</td></tr>`).join('')}</tbody></table></div>` : '';
+
+  const allLogs = S.logs.filter(l => (row.driverId && l.driver_id === row.driverId) || (!row.driverId && (l.driver_name || '').toLowerCase() === String(row.name).toLowerCase()));
+  const histHtml = `<div class="sub-h">Previous calls</div>` + (allLogs.length
+    ? `<div class="tbl-wrap"><div class="tbl-scroll"><table class="hist"><thead><tr><th>When</th><th>By</th><th>Status</th><th>Outcome / reason</th><th>Comment</th></tr></thead><tbody>${allLogs.slice().reverse().map(l => `<tr><td style="white-space:nowrap;">${callTime(l.created_at)}${l.done ? ' <span class="badge b-ok">done</span>' : ''}</td><td>${esc(l.caller)}</td><td>${esc(l.call_status)}</td><td>${esc([l.outcome, l.comeback_date ? 'on ' + shortDate(l.comeback_date) : null, l.reason].filter(Boolean).join(', ') || '-')}</td><td>${esc(l.comment || '')}</td></tr>`).join('')}</tbody></table></div></div>`
+    : `<div class="driver-sub" style="font-size:12.5px;">No calls logged yet.</div>`);
+
+  const f = cur.form;
+  const connected = f.status === 'Connected';
+  const opt = (list, val, ph) => `<option value="">${esc(ph)}</option>` + list.map(x => `<option ${x === val ? 'selected' : ''}>${esc(x)}</option>`).join('');
+  const form = `<div class="log-form">
+    <div class="sub-h" style="margin-top:0;">Log this call</div>
+    <div class="form-grid">
+      <div class="field"><label>Called by</label><div class="seg">${CALLERS.map(c => `<button type="button" class="${f.caller === c ? 'on' : ''}" onclick="setForm('caller','${c}')">${c}</button>`).join('')}</div></div>
+      <div class="field"><label for="fStatus">Call status</label><select id="fStatus" onchange="setForm('status', this.value)">${opt(CALL_STATUSES, f.status, 'Choose status')}</select></div>
+      ${connected ? `
+      <div class="field"><label for="fOutcome">Outcome</label><select id="fOutcome" onchange="setForm('outcome', this.value)">${opt(OUTCOMES, f.outcome, 'Choose outcome')}</select></div>
+      <div class="field"><label for="fReason">Main reason (if not driving or not paying)</label><select id="fReason" onchange="setForm('reason', this.value)">${opt(REASONS, f.reason, 'None / not applicable')}</select></div>
+      ${f.outcome === 'Coming back' ? `<div class="field"><label for="fBack">Coming back on</label><input type="date" id="fBack" value="${esc(f.comeback)}" min="${S.today}" onchange="setForm('comeback', this.value)"></div>` : ''}
+      ` : ''}
+      <div class="field full"><label for="fComment">Comment</label><textarea id="fComment" placeholder="What did the driver say?" oninput="S.current.form.comment=this.value">${esc(f.comment)}</textarea></div>
+    </div>
+    <div class="done-row"><input type="checkbox" id="fDone" ${f.done ? 'checked' : ''} onchange="S.current.form.done=this.checked"><label for="fDone">Mark as done. Moves to the Done tab; leave unticked to try again later.</label></div>
+    <div class="form-actions">
+      <button class="primary" id="saveBtn" onclick="saveCall()" ${S.tableMissing ? 'disabled' : ''}>Save call</button>
+      <span class="status-msg ${cur.msgCls || ''}" id="saveMsg">${esc(cur.msg || '')}</span>
+    </div>
+    <div class="driver-sub" style="margin-top:8px; font-size:11.5px;">Saving covers: ${row.items.map(itemLabel).map(esc).join(', ')}.</div>
+  </div>`;
+
+  document.getElementById('mBody').innerHTML = `<div class="why">${why}</div>${factsHtml}${strip}${leaveHtml}${histHtml}${form}`;
+}
+
+function setForm(k, v) {
+  const f = S.current.form;
+  const commentEl = document.getElementById('fComment'); if (commentEl) f.comment = commentEl.value;
+  f[k] = v;
+  if (k === 'caller') lsSet('portalCaller', v);
+  if (k === 'status') { f.done = v === 'Connected'; if (v !== 'Connected') { f.outcome = ''; f.reason = ''; f.comeback = ''; } }
+  if (k === 'outcome' && v !== 'Coming back') f.comeback = '';
+  S.current.msg = '';
+  renderModal();
+}
+
+async function saveCall() {
+  const cur = S.current; const row = cur.lastRow; const f = cur.form;
+  const commentEl = document.getElementById('fComment'); if (commentEl) f.comment = commentEl.value;
+  const fail = m => { cur.msg = m; cur.msgCls = 'err'; renderModal(); };
+  if (!f.caller) return fail('Choose who made the call.');
+  if (!f.status) return fail('Choose the call status.');
+  if (f.status === 'Connected' && !f.outcome) return fail('Choose the outcome.');
+  const btn = document.getElementById('saveBtn'); btn.disabled = true; btn.textContent = 'Saving…';
+  const rec = {
+    driver_id: row.driverId, driver_name: row.name, hub: row.hub, phone: row.phone,
+    item_keys: row.items.map(i => i.key), item_labels: row.items.map(itemLabel),
+    caller: f.caller, call_status: f.status, outcome: f.outcome || null, reason: f.reason || null,
+    comeback_date: f.comeback || null, comment: (f.comment || '').trim() || null, done: !!f.done,
+  };
+  const { error } = await sb.from(CALLS_TABLE).insert(rec);
+  if (error) { btn.disabled = false; btn.textContent = 'Save call'; return fail('Not saved: ' + error.message); }
+  await loadLogs();
+  // move on to the next driver in the list the caller was working through
+  const order = S.queueOrder || [];
+  const idx = order.indexOf(cur.rowKey);
+  renderAll();
+  const next = order.slice(idx + 1).find(k => (S.queueOrder || []).includes(k));
+  if (next) { openRow(next); S.current.msg = `Saved ${row.name}. Next driver:`; S.current.msgCls = 'ok'; renderModal(); }
+  else closeModal();
+}
+
+// ---------- done ----------
+function resultBadge(r) {
+  const cls = { back: 'b-ok', continued: 'b-ok', stayed: 'b-ok', notyet: 'b-wait', pending: 'b-wait', dropped: 'b-bad', left: 'b-bad' }[r.state] || 'b-wait';
+  return `<span class="badge ${cls}">${esc(r.label)}</span>`;
+}
+
+function renderDone() {
+  const all = calledItems(ctx()).filter(x => x.done && hubOk(x.hub));
+  document.getElementById('cntDone').textContent = all.length;
+  const part = (cat, ok, decided) => {
+    const sub = all.filter(x => x.cat === cat);
+    const good = sub.filter(x => ok.includes(x.result.state)).length;
+    const den = decided ? sub.filter(x => decided.includes(x.result.state)).length : sub.length;
+    return { n: sub.length, good, den, pct: den ? Math.round(good / den * 100) : null };
+  };
+  const r = part('rent', ['back']), j = part('join', ['continued'], ['continued', 'dropped']), e = part('exit', ['stayed'], ['stayed', 'left']);
+  const chip = p => p === null ? '' : ` <span class="pct-chip">${p}%</span>`;
+  document.getElementById('doneSummary').innerHTML = `
+    <div class="total-card"><div class="label">Done calls</div><div class="value">${all.length}</div><div class="foot">rent ${r.n}, new joiner ${j.n}, exit ${e.n}</div></div>
+    <div class="total-card"><div class="label">Rent: came back</div><div class="value">${r.good}${chip(r.pct)}</div><div class="foot">paid rent after the call, of ${r.den}</div></div>
+    <div class="total-card"><div class="label">New joiners continued</div><div class="value">${j.good}${chip(j.pct)}</div><div class="foot">paid rent on or after day 30, of ${j.den} past day 30 or dropped</div></div>
+    <div class="total-card"><div class="label">Exit notices: stayed</div><div class="value">${e.good}${chip(e.pct)}</div><div class="foot">paid rent after last working day, of ${e.den} decided</div></div>`;
+
+  const fb = (key, val, label, kind) => `<button class="filter-btn ${S[kind] === val ? 'active' : ''}" onclick="S.${kind}=${val === null ? 'null' : `'${val}'`}; renderDone();">${label}</button>`;
+  document.getElementById('doneFilters').innerHTML =
+    fb('c', null, 'All', 'doneCat') + fb('c', 'rent', 'Rent', 'doneCat') + fb('c', 'join', 'New joiner', 'doneCat') + fb('c', 'exit', 'Exit', 'doneCat') +
+    '<span style="width:10px;"></span>' + fb('p', null, 'Both callers', 'doneCaller') + CALLERS.map(c => fb('p', c, c, 'doneCaller')).join('');
+
+  let rows = all;
+  if (S.doneCat) rows = rows.filter(x => x.cat === S.doneCat);
+  if (S.doneCaller) rows = rows.filter(x => x.log.caller === S.doneCaller);
+  rows.sort((a, b) => Date.parse(b.log.created_at) - Date.parse(a.log.created_at));
+  const el = document.getElementById('doneTable');
+  if (!rows.length) { el.innerHTML = `<div class="empty">No done calls ${S.doneCat || S.doneCaller ? 'match this filter' : 'yet. Calls ticked as done show up here'}.</div>`; return; }
+  el.innerHTML = `<table><thead><tr><th>Driver</th><th>Call</th><th>Called</th><th>Status</th><th>Outcome / reason</th><th class="hide-sm">Comment</th><th>Result</th></tr></thead><tbody>` +
+    rows.map(x => `<tr>
+      <td><div class="driver-name">${esc(x.name)}</div><div class="driver-sub">${esc(x.driverId || '')}${x.hub ? ' · ' + esc(hubShort(x.hub)) : ''}</div></td>
+      <td>${keyBadge(x.cat, x.tier)}</td>
+      <td style="white-space:nowrap; font-size:12px;">${callTime(x.log.created_at)}<div class="driver-sub">${esc(x.log.caller)}${x.attempts > 1 ? `, ${x.attempts} tries` : ''}</div></td>
+      <td style="font-size:12.5px;">${esc(x.log.call_status)}</td>
+      <td style="font-size:12.5px;">${esc([x.log.outcome, x.log.comeback_date ? 'on ' + shortDate(x.log.comeback_date) : null, x.log.reason].filter(Boolean).join(', ') || '-')}</td>
+      <td class="hide-sm" style="font-size:12.5px; max-width:260px;">${esc(x.log.comment || '')}</td>
+      <td>${resultBadge(x.result)}</td></tr>`).join('') + '</tbody></table>';
+}
+
+// ---------- impact ----------
+function renderImpact() {
+  const c = ctx();
+  const hubLogs = S.logs.filter(l => hubOk(l.hub));
+  const I = impactSummary({ ...c, logs: hubLogs });
+  const cell = g => g.decided ? `${g.ok} of ${g.decided}` : '-';
+  const pct = g => g.rate === null ? '-' : `<b>${g.rate}%</b>`;
+  const cmpRow = (label, g) => `<tr><td>${label}</td><td class="num">${g.reached.total}</td><td class="num">${cell(g.reached)}</td><td class="num">${pct(g.reached)}</td><td class="num">${g.notReached.total}</td><td class="num">${cell(g.notReached)}</td><td class="num">${pct(g.notReached)}</td></tr>`;
+  const cmpHead = `<thead><tr><th></th><th class="num">Reached</th><th class="num">Result</th><th class="num">Rate</th><th class="num">Not reached</th><th class="num">Result</th><th class="num">Rate</th></tr></thead>`;
+  const bars = obj => {
+    const entries = Object.entries(obj).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    const max = Math.max(1, ...entries.map(e => e[1]));
+    return entries.length ? `<div class="bars">${entries.map(([k, v]) => `<div class="bar-row"><span>${esc(k)}</span><div class="bar-bg"><div class="bar-fill" style="width:${v / max * 100}%"></div></div><span class="mono" style="text-align:right;">${v}</span></div>`).join('')}</div>` : '<div class="driver-sub" style="font-size:12.5px;">Nothing logged yet.</div>';
+  };
+  document.getElementById('impactBody').innerHTML = `
+    <div class="section"><div class="section-head"><h2>Does reaching the driver help?</h2>
+      <span class="note">reached = connected on at least one try · not reached = only RNR, switched off, busy or wrong number</span></div>
+      <div class="tbl-wrap"><div class="tbl-scroll"><table>${cmpHead}<tbody>
+        ${cmpRow('Rent not paid: came back', I.rent)}
+        ${RENT_TIERS.map(t => cmpRow(`&nbsp;&nbsp;at ${t}+ days`, I.rentByTier[t])).join('')}
+        ${cmpRow('New joiners: continued past day 30', I.join)}
+        ${cmpRow('Exit notice: stayed', I.exit)}
+      </tbody></table></div></div>
+      <div class="note" style="margin-top:8px;">Came back = rent paid after the call. New joiner and exit rates count only drivers whose result is known (past day 30 or dropped; stayed or left).
+      ${I.medianDaysToReturn !== null ? ` Reached drivers who came back took a median of ${I.medianDaysToReturn} day${I.medianDaysToReturn === 1 ? '' : 's'}.` : ''}</div>
+    </div>
+    <div class="section grid2">
+      <div class="card"><h3>Why drivers stop (connected calls)</h3>${bars(I.reasons)}</div>
+      <div class="card"><h3>What drivers said</h3>${bars(I.outcomes)}</div>
+    </div>
+    <div class="section"><div class="section-head"><h2>Callers</h2></div>
+      <div class="tbl-wrap"><table><thead><tr><th>Caller</th><th class="num">Today</th><th class="num">All calls</th><th class="num">Connected</th><th class="num">Connect rate</th><th class="num">Marked done</th></tr></thead><tbody>
+      ${Object.entries(I.callers).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v.today}</td><td class="num">${v.calls}</td><td class="num">${v.connected}</td><td class="num">${v.calls ? Math.round(v.connected / v.calls * 100) + '%' : '-'}</td><td class="num">${v.done}</td></tr>`).join('')}
+      </tbody></table></div>
+    </div>`;
+}
+
+// ---------- start ----------
+refreshAll(false);
+setInterval(async () => { if (!sb || S.tableMissing) return; try { await loadLogs(); if (!S.current) renderAll(); else { renderQueue(); renderDone(); renderImpact(); } } catch (e) {} }, 60000);
+</script>
+</body>
+</html>
