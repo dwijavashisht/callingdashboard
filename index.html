@@ -67,13 +67,15 @@ button,select,input,textarea{font:inherit;}
 .tbl-scroll{overflow-x:auto;}
 table{width:100%; border-collapse:collapse; font-size:13px;}
 th{text-align:left; font-family:'IBM Plex Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:0.07em; color:var(--ink-dim); font-weight:500; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--panel-2); white-space:nowrap;}
-td{padding:9px 14px; border-bottom:1px solid var(--line); vertical-align:top;}
+td{padding:9px 14px; border-bottom:1px solid var(--line); vertical-align:middle;}
 tr:last-child td{border-bottom:none;}
 td.num,th.num{font-family:'IBM Plex Mono',monospace; text-align:right;}
-.clickable-row{cursor:pointer;}
-.clickable-row:hover td{background:var(--panel-2);}
-.clickable-row .driver-name{color:var(--blue); text-decoration:underline dotted var(--blue); text-underline-offset:3px;}
-.clickable-row.tried td{opacity:0.62;}
+.queue-row:hover td{background:var(--panel-2);}
+.queue-row.tried td{opacity:0.62;}
+#queueTable .badge{margin:2px 4px 2px 0;}
+th.ctr,td.ctr{text-align:center;}
+.call-now{background:var(--teal); color:#fff; border:none; border-radius:8px; padding:7px 14px; font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600; cursor:pointer; white-space:nowrap;}
+.call-now:hover{filter:brightness(0.93);}
 .driver-name{font-weight:500;}
 .driver-sub{color:var(--ink-dim); font-size:11px; font-family:'IBM Plex Mono',monospace;}
 .empty{padding:28px 20px; color:var(--ink-dim); font-size:13px; text-align:center;}
@@ -205,7 +207,7 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
       </div>
     </div>
     <div class="tbl-wrap"><div class="tbl-scroll" id="queueTable"></div></div>
-    <div class="note" style="margin-top:8px;">Drivers tried today without being marked done drop to the bottom, faded.</div>
+    <div class="note" style="margin-top:8px;">Drivers tried today but not connected drop to the bottom, faded.</div>
   </div>
 </div>
 
@@ -751,7 +753,7 @@ function setView(v) {
 }
 
 function itemBadge(it) {
-  if (it.cat === 'rent') return `<span class="badge b-rent${it.tier}">Rent ${it.tier}+ days</span>`;
+  if (it.cat === 'rent') return `<span class="badge b-rent${it.tier}">Rent not paid ${it.tier}+ days</span>`;
   if (it.cat === 'join') return `<span class="badge b-join">New joiner day ${it.tier}</span>`;
   if (it.cat === 'exit') return `<span class="badge b-exit">Exit notice</span>`;
   return '';
@@ -824,25 +826,26 @@ function renderQueueTable() {
     el.innerHTML = `<div class="empty">${S.ref ? 'Nobody to call here right now.' : 'Waiting for data.'}</div>`;
     return;
   }
-  el.innerHTML = `<table><thead><tr><th>Driver</th><th class="hide-sm">Hub</th><th>Phone</th><th>Why call</th><th class="hide-sm">Last rent</th><th>Tries</th><th class="hide-sm">Last try</th></tr></thead><tbody>` +
+  el.innerHTML = `<table><thead><tr><th>Driver</th><th class="hide-sm">Hub</th><th>Phone</th><th>Why call</th><th class="hide-sm">Last rent</th><th class="ctr">Tries</th><th class="hide-sm">Last try</th><th></th></tr></thead><tbody>` +
     rows.map(r => {
       const d = r.driverId ? S.drivers[r.driverId] : null;
       const last = r.lastAttempt;
-      return `<tr class="clickable-row ${r.triedToday ? 'tried' : ''}" onclick="openRow('${esc(r.rowKey)}')">
+      return `<tr class="queue-row ${r.triedToday ? 'tried' : ''}">
         <td><div class="driver-name">${esc(r.name)}</div><div class="driver-sub">${esc(r.driverId || 'not matched to ledger')}</div></td>
         <td class="hide-sm">${esc(r.hub ? hubShort(r.hub) : '-')}</td>
         <td class="mono" style="font-size:12px;">${esc(r.phone || '-')}</td>
         <td>${r.items.map(itemBadge).join('')}</td>
         <td class="hide-sm mono" style="font-size:12px;">${d && d.lastTopup ? shortDate(d.lastTopup) : '-'}</td>
-        <td class="num">${r.attempts.length}</td>
+        <td class="ctr mono">${r.attempts.length}</td>
         <td class="hide-sm" style="font-size:12px;">${last ? `${esc(last.call_status)}<div class="driver-sub">${esc(last.caller)}, ${callTime(last.created_at)}</div>` : '<span class="driver-sub">not called</span>'}</td>
+        <td><button class="call-now" onclick="openRow('${esc(r.rowKey)}')">Call now</button></td>
       </tr>`;
     }).join('') + '</tbody></table>';
 }
 
 // ---------- call sheet ----------
 function openRow(rowKey) {
-  S.current = { rowKey, form: { caller: lsGet('portalCaller') || '', status: '', outcome: '', reason: '', comeback: '', comment: '', done: false }, msg: '' };
+  S.current = { rowKey, form: { caller: lsGet('portalCaller') || '', status: '', outcome: '', reason: '', comeback: '', comment: '', }, msg: '' };
   renderModal();
   document.getElementById('modal').classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -922,9 +925,9 @@ function renderModal() {
       <div class="field"><label for="fReason">Main reason (if not driving or not paying)</label><select id="fReason" onchange="setForm('reason', this.value)">${opt(REASONS, f.reason, 'None / not applicable')}</select></div>
       ${f.outcome === 'Coming back' ? `<div class="field"><label for="fBack">Coming back on</label><input type="date" id="fBack" value="${esc(f.comeback)}" min="${S.today}" onchange="setForm('comeback', this.value)"></div>` : ''}
       ` : ''}
-      <div class="field full"><label for="fComment">Comment</label><textarea id="fComment" placeholder="What did the driver say?" oninput="S.current.form.comment=this.value">${esc(f.comment)}</textarea></div>
+      <div class="field full"><label for="fComment">Remark (required)</label><textarea id="fComment" placeholder="${connected ? 'What did the driver say?' : 'e.g. rang twice, no answer'}" oninput="S.current.form.comment=this.value">${esc(f.comment)}</textarea></div>
     </div>
-    <div class="done-row"><input type="checkbox" id="fDone" ${f.done ? 'checked' : ''} onchange="S.current.form.done=this.checked"><label for="fDone">Mark as done. Moves to the Done tab; leave unticked to try again later.</label></div>
+    <div class="driver-sub" style="font-size:12px; margin-top:4px;">${connected ? 'Connected with a remark moves this driver to Done.' : 'Not connected: the driver stays in the list to try again.'}</div>
     <div class="form-actions">
       <button class="primary" id="saveBtn" onclick="saveCall()" ${S.tableMissing ? 'disabled' : ''}>Save call</button>
       <span class="status-msg ${cur.msgCls || ''}" id="saveMsg">${esc(cur.msg || '')}</span>
@@ -940,7 +943,7 @@ function setForm(k, v) {
   const commentEl = document.getElementById('fComment'); if (commentEl) f.comment = commentEl.value;
   f[k] = v;
   if (k === 'caller') lsSet('portalCaller', v);
-  if (k === 'status') { f.done = v === 'Connected'; if (v !== 'Connected') { f.outcome = ''; f.reason = ''; f.comeback = ''; } }
+  if (k === 'status' && v !== 'Connected') { f.outcome = ''; f.reason = ''; f.comeback = ''; }
   if (k === 'outcome' && v !== 'Coming back') f.comeback = '';
   S.current.msg = '';
   renderModal();
@@ -953,12 +956,13 @@ async function saveCall() {
   if (!f.caller) return fail('Choose who made the call.');
   if (!f.status) return fail('Choose the call status.');
   if (f.status === 'Connected' && !f.outcome) return fail('Choose the outcome.');
+  if (!(f.comment || '').trim()) return fail('Write a remark before saving.');
   const btn = document.getElementById('saveBtn'); btn.disabled = true; btn.textContent = 'Saving…';
   const rec = {
     driver_id: row.driverId, driver_name: row.name, hub: row.hub, phone: row.phone,
     item_keys: row.items.map(i => i.key), item_labels: row.items.map(itemLabel),
     caller: f.caller, call_status: f.status, outcome: f.outcome || null, reason: f.reason || null,
-    comeback_date: f.comeback || null, comment: (f.comment || '').trim() || null, done: !!f.done,
+    comeback_date: f.comeback || null, comment: (f.comment || '').trim(), done: f.status === 'Connected',
   };
   const { error } = await sb.from(CALLS_TABLE).insert(rec);
   if (error) { btn.disabled = false; btn.textContent = 'Save call'; return fail('Not saved: ' + error.message); }
@@ -1005,7 +1009,7 @@ function renderDone() {
   if (S.doneCaller) rows = rows.filter(x => x.log.caller === S.doneCaller);
   rows.sort((a, b) => Date.parse(b.log.created_at) - Date.parse(a.log.created_at));
   const el = document.getElementById('doneTable');
-  if (!rows.length) { el.innerHTML = `<div class="empty">No done calls ${S.doneCat || S.doneCaller ? 'match this filter' : 'yet. Calls ticked as done show up here'}.</div>`; return; }
+  if (!rows.length) { el.innerHTML = `<div class="empty">No done calls ${S.doneCat || S.doneCaller ? 'match this filter' : 'yet. Connected calls with a remark show up here'}.</div>`; return; }
   el.innerHTML = `<table><thead><tr><th>Driver</th><th>Call</th><th>Called</th><th>Status</th><th>Outcome / reason</th><th class="hide-sm">Comment</th><th>Result</th></tr></thead><tbody>` +
     rows.map(x => `<tr>
       <td><div class="driver-name">${esc(x.name)}</div><div class="driver-sub">${esc(x.driverId || '')}${x.hub ? ' · ' + esc(hubShort(x.hub)) : ''}</div></td>
