@@ -256,6 +256,8 @@ const JOIN_CONTINUED_DAY = 30;       // paid rent on or after day 30 = continued
 // Calls never expire: once a call comes up it stays until it is connected with a remark.
 // Only calls that came up on or after this date are listed.
 const PORTAL_START = '2026-08-01';
+const EXIT_START = '2026-09-15';     // exit notices: last working day on or after this date
+const JOIN_DROP_DAY = 15;            // new joiner call drops off from day 15 (day 1 = first rent paid)
 
 const CALL_STATUSES = ['Connected', 'RNR', 'Switched off / not reachable', 'Busy / call back later', 'Wrong number'];
 const OUTCOMES = ['Coming back', 'Will pay rent today', 'On leave', 'Wants to exit / left', 'All good'];
@@ -526,7 +528,7 @@ function buildItems(ctx) {
     });
     // new joiner feedback: day 1 is the first day they paid rent; one call at the latest day reached
     const jc = joinerCohort(d, today);
-    if (jc) items.push({ key: `join|${d.id}|${jc.anchor}|${jc.tier}`, cat: 'join', tier: jc.tier, driverId: d.id, anchor: jc.anchor,
+    if (jc && jc.dayNum < JOIN_DROP_DAY) items.push({ key: `join|${d.id}|${jc.anchor}|${jc.tier}`, cat: 'join', tier: jc.tier, driverId: d.id, anchor: jc.anchor,
       openSince: addDays(jc.anchor, jc.tier - 1), dayNum: jc.dayNum,
       detail: `Day ${jc.tier} feedback (today is day ${jc.dayNum}, day 1 was ${fmtDay(jc.anchor)})` });
   });
@@ -535,7 +537,7 @@ function buildItems(ctx) {
   (exits || []).forEach(e => {
     if (!e || !e.lastWorkingDate) return;
     if (/reject|withdraw|cancel/i.test(e.status || '')) return;
-    if (e.lastWorkingDate < PORTAL_START) return;
+    if (e.lastWorkingDate < EXIT_START) return;
     const m = match(e.driverFeId, e.driverName);
     const who = m.id || ('name:' + normName(e.driverName));
     const noticeDay = toDateStr(e.createdAt) || null;
@@ -732,7 +734,7 @@ function impactSummary(ctx) {
   });
   const exitMatch = makeMatcher(ctx.drivers || {});
   (ctx.exits || []).forEach(e => {
-    if (!e || !e.lastWorkingDate || /reject|withdraw|cancel/i.test(e.status || '') || e.lastWorkingDate < PORTAL_START) return;
+    if (!e || !e.lastWorkingDate || /reject|withdraw|cancel/i.test(e.status || '') || e.lastWorkingDate < EXIT_START) return;
     const m = exitMatch(e.driverFeId, e.driverName);
     const who = m.id || ('name:' + normName(e.driverName));
     if (loggedPrefixes.has(`exit|${who}|${e.lastWorkingDate}`)) return;
@@ -980,10 +982,10 @@ function renderQueue() {
     <div class="kpi-group"><div class="glabel">New joiner feedback</div><div class="kpis k3">
       ${card('join', 3, 'Day 3', 'on day 3 or 4', 'c-blue')}
       ${card('join', 5, 'Day 5', 'on day 5 to 9', 'c-blue')}
-      ${card('join', 10, 'Day 10', 'day 10 or later', 'c-blue')}
+      ${card('join', 10, 'Day 10', 'day 10 to 14', 'c-blue')}
     </div></div>
     <div class="kpi-group"><div class="glabel">Retention</div><div class="kpis k1">
-      ${card('exit', null, 'Exit notice', 'before last working day', 'c-purple')}
+      ${card('exit', null, 'Exit notice', 'last working day from 15 Sep', 'c-purple')}
     </div></div>
     <div class="kpi-group"><div class="glabel">Service</div><div class="kpis k1">
       ${card('svc', null, 'Service feedback', 'from the day after service', 'c-svc')}
