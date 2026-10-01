@@ -219,7 +219,7 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
   <div class="section">
     <div class="section-head">
       <h2>Done calls</h2>
-      <div class="filters" id="doneFilters"></div>
+      <div class="filters"><input class="search" id="doneSearch" placeholder="Search name, ID or phone" oninput="renderDone()"><span id="doneFilters" class="filters"></span></div>
     </div>
     <div class="tbl-wrap"><div class="tbl-scroll" id="doneTable"></div></div>
   </div>
@@ -1117,9 +1117,10 @@ function renderModal() {
 
   const rowKeys = new Set(row.items.map(i => i.key));
   const allLogs = S.logs.filter(l => (row.driverId && l.driver_id === row.driverId) || (l.item_keys || []).some(k => rowKeys.has(k)) || (!row.driverId && !isSvc && (l.driver_name || '').toLowerCase() === String(row.name).toLowerCase()));
-  const histHtml = `<div class="sub-h">Previous calls</div>` + (allLogs.length
-    ? `<div class="tbl-wrap"><div class="tbl-scroll"><table class="hist"><thead><tr><th>When</th><th>By</th><th>Status</th><th>Outcome / reason</th><th>Comment</th></tr></thead><tbody>${allLogs.slice().reverse().map(l => `<tr><td style="white-space:nowrap;">${callTime(l.created_at)}${l.done ? ' <span class="badge b-ok">done</span>' : ''}</td><td>${esc(l.caller)}</td><td>${esc(l.call_status)}</td><td>${esc([l.outcome, l.comeback_date ? 'on ' + shortDate(l.comeback_date) : null, l.reason].filter(Boolean).join(', ') || '-')}</td><td>${esc(l.comment || '')}</td></tr>`).join('')}</tbody></table></div></div>`
-    : `<div class="driver-sub" style="font-size:12.5px;">No calls logged yet.</div>`);
+  const logLabelBadges = l => (l.item_keys || []).map(k => { const p = k.split('|'); return keyBadge(p[0], p[3] ? Number(p[3]) : null); }).join('');
+  const histHtml = `<div class="sub-h" style="margin-top:0;">Previous calls with this driver${allLogs.length ? ` (${allLogs.length})` : ''}</div>` + (allLogs.length
+    ? `<div class="tbl-wrap" style="margin-bottom:14px;"><div class="tbl-scroll"><table class="hist"><thead><tr><th>When</th><th>Call about</th><th>By</th><th>Status</th><th>Outcome / reason</th><th>Remark</th></tr></thead><tbody>${allLogs.slice().reverse().map(l => `<tr><td style="white-space:nowrap;">${callTime(l.created_at)}${l.done ? ' <span class="badge b-ok">done</span>' : ''}</td><td>${logLabelBadges(l)}</td><td>${esc(l.caller)}</td><td>${esc(l.call_status)}</td><td>${esc([l.outcome, l.comeback_date ? 'on ' + shortDate(l.comeback_date) : null, l.reason].filter(Boolean).join(', ') || '-')}</td><td style="min-width:200px;">${esc(l.comment || '')}</td></tr>`).join('')}</tbody></table></div></div>`
+    : `<div class="driver-sub" style="font-size:12.5px; margin-bottom:14px;">No calls logged with this driver yet.</div>`);
 
   const f = cur.form;
   const connected = f.status === 'Connected';
@@ -1144,7 +1145,7 @@ function renderModal() {
     <div class="driver-sub" style="margin-top:8px; font-size:11.5px;">Saving covers: ${row.items.map(itemLabel).map(esc).join(', ')}.</div>
   </div>`;
 
-  document.getElementById('mBody').innerHTML = `<div class="why">${why}</div>${svcHtml}${factsHtml}${strip}${leaveHtml}${histHtml}${form}`;
+  document.getElementById('mBody').innerHTML = `<div class="why">${why}</div>${histHtml}${svcHtml}${factsHtml}${strip}${leaveHtml}${form}`;
 }
 
 function setForm(k, v) {
@@ -1191,6 +1192,10 @@ function resultBadge(r) {
   return `<span class="badge ${cls}">${esc(r.label)}</span>`;
 }
 
+function earlierRemarks(key, basis) {
+  return S.logs.filter(l => l !== basis && (l.item_keys || []).includes(key) && Date.parse(l.created_at) < Date.parse(basis.created_at))
+    .map(l => `${shortDate(istDateOf(l.created_at))} ${l.call_status}${l.comment ? ': ' + l.comment : ''}`).join(' · ');
+}
 function renderDone() {
   const all = calledItems(ctx()).filter(x => x.done && hubOk(x.hub));
   document.getElementById('cntDone').textContent = all.length;
@@ -1217,6 +1222,8 @@ function renderDone() {
   let rows = all;
   if (S.doneCat) rows = rows.filter(x => x.cat === S.doneCat);
   if (S.doneCaller) rows = rows.filter(x => x.log.caller === S.doneCaller);
+  const dq = ((document.getElementById('doneSearch') || {}).value || '').trim().toLowerCase();
+  if (dq) rows = rows.filter(x => [x.name, x.driverId, x.log.phone, x.vehicle].some(v => String(v || '').toLowerCase().includes(dq)));
   rows.sort((a, b) => Date.parse(b.log.created_at) - Date.parse(a.log.created_at));
   const el = document.getElementById('doneTable');
   if (!rows.length) { el.innerHTML = `<div class="empty">No done calls ${S.doneCat || S.doneCaller ? 'match this filter' : 'yet. Connected calls with a remark show up here'}.</div>`; return; }
@@ -1227,7 +1234,7 @@ function renderDone() {
       <td style="white-space:nowrap; font-size:12px;">${callTime(x.log.created_at)}<div class="driver-sub">${esc(x.log.caller)}${x.attempts > 1 ? `, ${x.attempts} tries` : ''}</div></td>
       <td style="font-size:12.5px;">${esc(x.log.call_status)}</td>
       <td style="font-size:12.5px;">${esc([x.log.outcome, x.log.comeback_date ? 'on ' + shortDate(x.log.comeback_date) : null, x.log.reason].filter(Boolean).join(', ') || '-')}</td>
-      <td class="hide-sm" style="font-size:12.5px; max-width:260px;">${esc(x.log.comment || '')}</td>
+      <td class="hide-sm" style="font-size:12.5px; max-width:260px;">${esc(x.log.comment || '')}${x.attempts > 1 ? `<div class="driver-sub" style="margin-top:3px;">${x.attempts - 1} earlier ${x.attempts - 1 === 1 ? 'try' : 'tries'}: ${esc(earlierRemarks(x.key, x.log))}</div>` : ''}</td>
       <td>${resultBadge(x.result)}</td></tr>`).join('') + '</tbody></table>';
 }
 
