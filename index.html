@@ -49,7 +49,7 @@ button,select,input,textarea{font:inherit;}
 .section-head h2{font-size:19px; font-weight:600;}
 .note{font-size:12px; color:var(--ink-dim); font-family:'IBM Plex Mono',monospace;}
 
-.kpi-groups{display:grid; grid-template-columns:3fr 3fr 1fr; gap:14px;}
+.kpi-groups{display:grid; grid-template-columns:3fr 3fr 1fr 1fr; gap:14px;}
 .kpi-group .glabel{font-size:12px; color:var(--ink-dim); margin:0 0 6px 2px; font-weight:500;}
 .kpis{display:grid; gap:10px;}
 .kpis.k3{grid-template-columns:repeat(3,1fr);}
@@ -61,7 +61,7 @@ button,select,input,textarea{font:inherit;}
 .kpi .value{font-family:'IBM Plex Mono',monospace; font-size:28px; font-weight:600; margin-top:6px;}
 .kpi .foot{font-size:11px; color:var(--ink-dim); margin-top:4px;}
 .kpi.c-amber{color:var(--amber);} .kpi.c-rose{color:var(--rose);} .kpi.c-deep{color:#9f1239;}
-.kpi.c-blue{color:var(--blue);} .kpi.c-teal{color:var(--teal);} .kpi.c-purple{color:var(--purple);}
+.kpi.c-svc{color:#0f766e;} .kpi.c-blue{color:var(--blue);} .kpi.c-teal{color:var(--teal);} .kpi.c-purple{color:var(--purple);}
 
 .tbl-wrap{background:var(--panel); border:1px solid var(--line); border-radius:14px; overflow:hidden;}
 .tbl-scroll{overflow-x:auto;}
@@ -86,6 +86,7 @@ th.ctr,td.ctr{text-align:center;}
 .b-rent10{background:rgba(159,18,57,0.14); color:#9f1239;}
 .b-join{background:rgba(37,99,235,0.12); color:var(--blue);}
 .b-exit{background:rgba(124,58,237,0.12); color:var(--purple);}
+.b-svc{background:rgba(15,118,110,0.12); color:#0f766e;}
 .b-ok{background:rgba(15,157,104,0.12); color:var(--teal);}
 .b-bad{background:rgba(213,56,79,0.12); color:var(--rose);}
 .b-wait{background:rgba(139,147,161,0.15); color:var(--slate);}
@@ -207,12 +208,12 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
       </div>
     </div>
     <div class="tbl-wrap"><div class="tbl-scroll" id="queueTable"></div></div>
-    <div class="note" style="margin-top:8px;">Drivers tried today but not connected drop to the bottom, faded.</div>
+    <div class="note" style="margin-top:8px;">Calls stay until connected with a remark. Rent calls drop off only if the driver pays. Drivers tried today but not connected drop to the bottom, faded.</div>
   </div>
 </div>
 
 <div id="viewDone" style="display:none;">
-  <div class="summary-row" id="doneSummary"></div>
+  <div class="summary-row" id="doneSummary" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));"></div>
   <div class="section">
     <div class="section-head">
       <h2>Done calls</h2>
@@ -250,17 +251,21 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
 const DATA_START_DATE = '2026-07-12';
 const GONE_DAYS = 7;
 const RENT_TIERS = [3, 5, 10];       // days with no rent that trigger a call
-const RENT_MAX_DAYS = 30;            // past this a driver has left; not a check-up call any more
 const JOIN_TIERS = [3, 5, 10];       // feedback call on these days, day 1 = first rent paid
-const JOIN_LAST_DAY = 14;            // the day-10 call stays open until this day
 const JOIN_CONTINUED_DAY = 30;       // paid rent on or after day 30 = continued
-const EXIT_LOOKBACK_DAYS = 3;        // exit notices stay callable this many days past last working date
+// Calls never expire: once a call comes up it stays until it is connected with a remark.
+// Only calls that came up on or after this date are listed.
+const PORTAL_START = '2026-08-01';
 
 const CALL_STATUSES = ['Connected', 'RNR', 'Switched off / not reachable', 'Busy / call back later', 'Wrong number'];
 const OUTCOMES = ['Coming back', 'Will pay rent today', 'On leave', 'Wants to exit / left', 'All good'];
 const REASONS = ['Vehicle issue', 'Charging issue', 'Low earnings', 'Health', 'Family / village',
   'Joined another fleet or platform', 'Issue with hub staff', 'Other'];
 const CALLERS = ['Jyoti', 'Swati'];
+const SERVICE_OUTCOMES = ['Happy with service', 'Took too long', 'New problem after service', 'Other'];
+// Passenger vehicles, copied from the passenger dashboard's MASTER_VEHICLE_LIST (138 vehicles).
+// Update both together when vehicles are added or removed.
+const MASTER_VEHICLES = new Set(`HR55AX8126 HR55AX7619 HR55AX3907 HR55AX1827 HR55AX6956 HR55AX6315 HR55AX3984 HR55AX7701 HR55AX6742 HR55AX8870 HR55AY4364 HR55AY1555 HR55AY7485 HR55AY5652 HR55AY3908 HR55AY5313 HR55AY7435 HR55AY5129 HR55AY2131 HR55AY7978 HR55AY9442 HR55AY8331 HR55AY1196 HR55AY2869 HR55AY3090 HR55AY4553 HR55AY1267 HR55AY5689 HR55AY7331 HR55AY2872 HR55AY1424 HR55AY8533 HR55AY6043 HR55AY1348 HR55AZ5920 HR55AZ0305 HR55AZ4412 HR55AZ1179 HR55AZ3134 HR55AZ9162 HR55AZ9194 HR55AZ5122 HR55AZ0539 HR55AZ9198 HR55AZ5152 HR55AZ5131 HR55AZ6331 HR55AZ6945 HR55AZ5818 HR55AZ2926 HR55AZ3558 HR55AZ4836 HR55AZ8618 HR55AZ5118 HR55AZ8796 HR55AZ3300 HR55AZ9788 HR55AZ0630 HR55BB0138 HR55BB7106 HR55BB9457 HR55BB9486 HR55BB5599 HR55BB5990 HR55BB2123 HR55BB7571 HR55BB8841 HR55BB2614 HR55BB5558 HR55BB6087 HR55BC2751 HR55BC3974 HR55BC0365 HR55BC4384 HR55BC0297 HR55BC8680 HR55BC2114 HR55BC7156 HR55BC1585 HR55BC5990 HR55BC8188 HR55BC4275 HR55BC2333 HR55BC8603 HR55BC2495 HR55BC1360 HR55BC9354 HR55BC9795 HR55BC9322 HR55BC7385 HR55BC4794 HR55BC6385 HR55BD0298 HR55BD0674 HR55BD1217 HR55BD8570 HR55BD5336 HR55BD0771 HR55BD7649 HR55BD4410 HR55BD6067 HR55BD9136 HR55BD3429 HR55BD0143 HR55BD9822 HR55BD7475 HR55BD7108 HR55BD1349 HR55BD5914 HR55BD1016 HR55BD3595 HR55BD0943 HR55BD8483 HR55BD7865 HR55BD5381 HR55BD2227 HR55BD8011 HR55BD2149 HR55BD8310 HR55BD8891 HR55BD6263 HR55BD1104 HR55BE9690 HR55BE2909 HR55BE0449 HR55BE4329 HR55BE1760 HR55BE8743 HR55BE0260 HR55BE3562 HR55BE7992 HR55BE6248 HR55BE9701 HR55BE2056 HR55BE4225 HR55BE8784 HR55BE0608 HR55BE8835`.split(' '));
 
 const HUBS = [
   { key: 'rajeev-chowk', label: 'Rajeev Chowk (Sec 68)', short: 'Rajeev Chowk', payoutSuffixes: ['rajeev chowk'] },
@@ -334,6 +339,60 @@ function hubKeyFromPayout(p) {
   return hub ? hub.key : null;
 }
 function hubShort(key) { const h = HUBS.find(x => x.key === key); return h ? h.short : 'Hub not recognised'; }
+function normReg(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+
+// Service tracker dates arrive as shown in the sheet ("26-Jun-25", "13-Aug-2026") or, from some
+// exports, month-first ("6/26/2025") as the dashboard assumes for this workbook.
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+function sheetDay(raw) {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'number') return toDateStr(raw);
+  const t = String(raw).trim(); if (!t) return null;
+  let m = t.match(/^(\d{1,2})[-\s]([A-Za-z]{3})[A-Za-z]*[-\s,]+(\d{2,4})$/);
+  if (m && MONTHS[m[2].toLowerCase()]) {
+    let y = +m[3]; if (y < 100) y += 2000;
+    const mo = MONTHS[m[2].toLowerCase()], d = +m[1];
+    if (d >= 1 && d <= 31) return utcToDateStr(Date.UTC(y, mo - 1, d));
+  }
+  m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return utcToDateStr(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (m) { let y = +m[3]; if (y < 100) y += 2000; const a = +m[1], b = +m[2];
+    if (a <= 12) return utcToDateStr(Date.UTC(y, a - 1, b));
+    if (b <= 12) return utcToDateStr(Date.UTC(y, b - 1, a)); }
+  return null;
+}
+
+// Service_Tracker tab. Columns are found by their header names (VEHICLE NO, then one
+// Due_Date / Done on KM / Done_Date block per service); if the headers can't be found it falls
+// back to the layout the passenger dashboard uses (vehicle in column 1, blocks from column 13).
+function parseServiceTracker(rows) {
+  rows = rows || [];
+  let hi = -1;
+  for (let i = 0; i < Math.min(rows.length, 6); i++) if ((rows[i] || []).some(c => /vehicle\s*_?\s*no/i.test(c || ''))) { hi = i; break; }
+  let vCol, doneCols, source;
+  if (hi >= 0) {
+    vCol = rows[hi].findIndex(c => /vehicle\s*_?\s*no/i.test(c || ''));
+    doneCols = [];
+    rows[hi].forEach((c, i) => { if (/done[_\s]*date/i.test(c || '')) doneCols.push(i); });
+    source = 'headers';
+  }
+  if (hi < 0 || !doneCols.length) {
+    hi = 0; vCol = 1; doneCols = []; for (let i = 0; i < 10; i++) doneCols.push(13 + i * 3 + 2); source = 'fixed';
+  }
+  const out = [];
+  rows.slice(hi + 1).forEach(r => {
+    const vehicle = normReg(r[vCol]);
+    if (!/^[A-Z]{2}\d{2}[A-Z]{1,3}\d{3,4}$/.test(vehicle)) return;
+    const history = doneCols.map((dc, i) => ({
+      num: i + 1, dueDate: sheetDay(r[dc - 2]), doneKm: (r[dc - 1] || '').toString().trim() || null, doneDate: sheetDay(r[dc]),
+      rawDone: (r[dc] || '').toString().trim(),
+    })).filter(h => h.dueDate || h.doneKm || h.doneDate || h.rawDone);
+    out.push({ vehicle, history });
+  });
+  return { vehicles: out, source };
+}
+
 function numOrNull(v) { return (v === undefined || v === null || v === '' || isNaN(Number(v))) ? null : Number(v); }
 
 // ---------- building driver records ----------
@@ -394,11 +453,22 @@ function buildSessions(sessionsBySnapshot) {
       const id = driverIdOf(r.driver);
       const date = toDateStr(r.started) || snap;
       const s = S[id] || (S[id] = { dates: new Set(), lastDate: null, lastVehicle: null });
+      const veh = normReg(r.vehicle);
+      if (veh) {
+        const byV = S.__byVehicle || (Object.defineProperty(S, '__byVehicle', { value: {}, enumerable: false }), S.__byVehicle);
+        const day = (byV[veh] = byV[veh] || {});
+        (day[date] = day[date] || new Set()).add(id);
+      }
       s.dates.add(date);
       if (!s.lastDate || date >= s.lastDate) { s.lastDate = date; if (r.vehicle) s.lastVehicle = String(r.vehicle).trim(); }
     });
   });
+  if (!S.__byVehicle) Object.defineProperty(S, '__byVehicle', { value: {}, enumerable: false });
   return S;
+}
+function driversOnVehicle(sessions, vehicle, date) {
+  const byV = sessions && sessions.__byVehicle ? sessions.__byVehicle[vehicle] : null;
+  return byV && byV[date] ? Array.from(byV[date]).sort() : [];
 }
 
 // Leave and exit files name drivers, sometimes with an FE id. The id wins when it maps to a
@@ -419,6 +489,26 @@ function makeMatcher(drivers) {
   };
 }
 
+// Every rent lapse of 3+ days that began on or after PORTAL_START. A lapse runs from a rent
+// payment to the next one; the open lapse runs to the last ledger date.
+function rentEpisodes(d, ref) {
+  const out = [], ds = d.topupDates;
+  ds.forEach((a, i) => {
+    const b = ds[i + 1] || null;
+    const gap = b ? daysBetween(a, b) - 1 : daysBetween(a, ref);
+    if (gap < RENT_TIERS[0] || addDays(a, RENT_TIERS[0]) < PORTAL_START) return;
+    out.push({ driverId: d.id, anchor: a, paidAgain: b, gap, open: !b, tier: tierFor(gap, RENT_TIERS) });
+  });
+  return out;
+}
+// New joiners whose day-3 call fell on or after PORTAL_START
+function joinerCohort(d, today) {
+  if (!d.doj || !d.firstRentDay || d.doj < DATA_START_DATE) return null;
+  const dayNum = daysBetween(d.firstRentDay, today) + 1;
+  if (dayNum < JOIN_TIERS[0] || addDays(d.firstRentDay, JOIN_TIERS[0] - 1) < PORTAL_START) return null;
+  return { driverId: d.id, anchor: d.firstRentDay, dayNum, tier: tierFor(dayNum, JOIN_TIERS) };
+}
+
 function tierFor(value, tiers) { let t = null; tiers.forEach(x => { if (value >= x) t = x; }); return t; }
 
 // ---------- the queue ----------
@@ -427,38 +517,50 @@ function buildItems(ctx) {
   const { drivers, exits, today, ref } = ctx;
   const items = [];
   Object.values(drivers).forEach(d => {
-    // rent not paid: full days since the last rent payment, counted to the last ledger date
-    if (d.lastTopup) {
-      const gap = daysBetween(d.lastTopup, ref);
-      if (gap >= RENT_TIERS[0] && gap <= RENT_MAX_DAYS) {
-        const tier = tierFor(gap, RENT_TIERS);
-        items.push({ key: `rent|${d.id}|${d.lastTopup}|${tier}`, cat: 'rent', tier, driverId: d.id,
-          anchor: d.lastTopup, detail: `No rent for ${gap} day${gap === 1 ? '' : 's'} (last paid ${fmtDay(d.lastTopup)})`, gap });
-      }
-    }
-    // new joiner feedback: day 1 is the first day they paid rent
-    if (d.doj && d.firstRentDay && d.doj >= DATA_START_DATE) {
-      const dayNum = daysBetween(d.firstRentDay, today) + 1;
-      if (dayNum >= JOIN_TIERS[0] && dayNum <= JOIN_LAST_DAY) {
-        const tier = tierFor(dayNum, JOIN_TIERS);
-        items.push({ key: `join|${d.id}|${d.firstRentDay}|${tier}`, cat: 'join', tier, driverId: d.id,
-          anchor: d.firstRentDay, detail: `Day ${tier} feedback (today is day ${dayNum}, day 1 was ${fmtDay(d.firstRentDay)})`, dayNum });
-      }
-    }
+    // rent not paid: the current lapse only. A driver who pays again drops off the list.
+    // One call per lapse at the latest step reached (3, 5 or 10 days); no upper limit.
+    rentEpisodes(d, ref).filter(e => e.open).forEach(e => {
+      items.push({ key: `rent|${d.id}|${e.anchor}|${e.tier}`, cat: 'rent', tier: e.tier, driverId: d.id, anchor: e.anchor,
+        openSince: addDays(e.anchor, e.tier), gap: e.gap,
+        detail: `No rent for ${e.gap} day${e.gap === 1 ? '' : 's'} (last paid ${fmtDay(e.anchor)})` });
+    });
+    // new joiner feedback: day 1 is the first day they paid rent; one call at the latest day reached
+    const jc = joinerCohort(d, today);
+    if (jc) items.push({ key: `join|${d.id}|${jc.anchor}|${jc.tier}`, cat: 'join', tier: jc.tier, driverId: d.id, anchor: jc.anchor,
+      openSince: addDays(jc.anchor, jc.tier - 1), dayNum: jc.dayNum,
+      detail: `Day ${jc.tier} feedback (today is day ${jc.dayNum}, day 1 was ${fmtDay(jc.anchor)})` });
   });
   // exit notices still worth a retention call
   const match = makeMatcher(drivers);
   (exits || []).forEach(e => {
     if (!e || !e.lastWorkingDate) return;
     if (/reject|withdraw|cancel/i.test(e.status || '')) return;
-    if (e.lastWorkingDate < addDays(today, -EXIT_LOOKBACK_DAYS)) return;
+    if (e.lastWorkingDate < PORTAL_START) return;
     const m = match(e.driverFeId, e.driverName);
     const who = m.id || ('name:' + normName(e.driverName));
+    const noticeDay = toDateStr(e.createdAt) || null;
     items.push({ key: `exit|${who}|${e.lastWorkingDate}`, cat: 'exit', tier: null, driverId: m.id,
+      openSince: noticeDay && noticeDay <= e.lastWorkingDate ? noticeDay : e.lastWorkingDate,
       unmatchedName: m.id ? null : e.driverName, matchHow: m.how,
       anchor: e.lastWorkingDate, detail: `Exit notice, last working day ${fmtDay(e.lastWorkingDate)}` +
         (e.noticeReason ? `. Reason given: ${e.noticeReason}` : '') + (e.status ? ` (${e.status})` : ''),
       exit: e });
+  });
+  // service feedback: the driver who checked in on that vehicle on the service day
+  (ctx.services || []).forEach(v => {
+    if (!MASTER_VEHICLES.has(v.vehicle)) return;
+    v.history.forEach(h => {
+      if (!h.doneDate) return;
+      const age = daysBetween(h.doneDate, today);
+      if (age < 1 || addDays(h.doneDate, 1) < PORTAL_START) return;
+      const ids = driversOnVehicle(ctx.sessions, v.vehicle, h.doneDate).filter(id => drivers[id]);
+      const base = { cat: 'svc', tier: h.num, anchor: h.doneDate, vehicle: v.vehicle, openSince: addDays(h.doneDate, 1), service: h, serviceHistory: v.history };
+      const what = `Service ${h.num} done ${fmtDay(h.doneDate)}${h.doneKm ? ' at ' + h.doneKm + ' km' : ''} on ${v.vehicle}`;
+      if (ids.length) ids.forEach(id => items.push({ ...base, key: `svc|${id}|${h.doneDate}|${h.num}|${v.vehicle}`, driverId: id,
+        detail: what + (ids.length > 1 ? `. ${ids.length} drivers checked in on it that day` : '') }));
+      else items.push({ ...base, key: `svc|veh:${v.vehicle}|${h.doneDate}|${h.num}|${v.vehicle}`, driverId: null,
+        unmatchedName: v.vehicle, matchHow: ref < h.doneDate ? 'nodata' : 'nocheckin', detail: what });
+    });
   });
   return items;
 }
@@ -473,6 +575,7 @@ function logsByItem(logs) {
 
 const CAT_RANK = { rent: 3, exit: 2, join: 1 };
 function itemScore(it) {
+  if (it.cat === 'svc') return 150;
   if (it.cat === 'rent') return 300 + it.tier * 10 + Math.min(it.gap, 30);
   if (it.cat === 'exit') return 250;
   return 100 + it.tier;
@@ -484,7 +587,8 @@ function buildQueue(ctx) {
   const open = items.filter(it => !(byItem[it.key] || []).some(l => l.done));
   const rows = {};
   open.forEach(it => {
-    const rk = it.driverId || ('name:' + normName(it.unmatchedName));
+    const rk = it.cat === 'svc' ? `svc:${it.driverId || 'veh'}:${it.vehicle}:${it.anchor}:${it.tier}`
+      : (it.driverId || ('name:' + normName(it.unmatchedName)));
     const r = rows[rk] || (rows[rk] = { rowKey: rk, driverId: it.driverId, name: null, items: [], attempts: [] });
     r.items.push(it);
     (byItem[it.key] || []).forEach(l => { if (!r.attempts.includes(l)) r.attempts.push(l); });
@@ -499,9 +603,10 @@ function buildQueue(ctx) {
     r.lastAttempt = r.attempts[r.attempts.length - 1] || null;
     r.triedToday = !!(r.lastAttempt && istDateOf(r.lastAttempt.created_at) === ctx.today);
     r.score = itemScore(r.items[0]);
+    r.openSince = r.items.map(i => i.openSince).filter(Boolean).sort()[0] || null;
     return r;
   });
-  list.sort((a, b) => (a.triedToday - b.triedToday) || (b.score - a.score) || String(a.name).localeCompare(String(b.name)));
+  list.sort((a, b) => (a.triedToday - b.triedToday) || (b.score - a.score) || String(a.openSince || '').localeCompare(String(b.openSince || '')) || String(a.name).localeCompare(String(b.name)));
   return { rows: list, items, byItem };
 }
 
@@ -514,13 +619,18 @@ function firstTopupAfter(d, callIso) {
 
 function parseItemKey(k) {
   const p = k.split('|');
-  return { cat: p[0], who: p[1], anchor: p[2], tier: p[3] ? Number(p[3]) : null };
+  return { cat: p[0], who: p[1], anchor: p[2], tier: p[3] ? Number(p[3]) : null, vehicle: p[4] || null };
 }
 
 // The result of one called item, judged against the ledger. refIso = time of the call used.
-function itemResult(key, callIso, ctx) {
+function itemResult(key, callIso, ctx, log) {
   const pk = parseItemKey(key);
-  const id = pk.who.startsWith('name:') ? null : pk.who;
+  const id = /^(name|veh):/.test(pk.who) ? null : pk.who;
+  if (pk.cat === 'svc') {
+    if (!log || log.call_status !== 'Connected') return { state: 'notyet', label: 'Not reached' };
+    if (log.outcome === 'Happy with service') return { state: 'happy', label: 'Happy with service' };
+    return { state: 'unhappy', label: log.outcome || 'Feedback given' };
+  }
   const d = id ? ctx.drivers[id] : null;
   if (pk.cat === 'rent') {
     const t = firstTopupAfter(d, callIso);
@@ -551,14 +661,14 @@ function calledItems(ctx) {
     const last = logs[logs.length - 1];
     const basis = doneLog || last;
     const pk = parseItemKey(key);
-    const id = pk.who.startsWith('name:') ? null : pk.who;
+    const id = /^(name|veh):/.test(pk.who) ? null : pk.who;
     const d = id ? ctx.drivers[id] : null;
     const reached = logs.some(l => l.call_status === 'Connected');
     return {
-      key, cat: pk.cat, tier: pk.tier, anchor: pk.anchor, driverId: id,
-      name: d ? d.name : (basis.driver_name || pk.who.replace(/^name:/, '')), hub: d ? d.hub : null,
+      key, cat: pk.cat, tier: pk.tier, anchor: pk.anchor, driverId: id, vehicle: pk.vehicle,
+      name: d ? d.name : (basis.driver_name || pk.who.replace(/^(name|veh):/, '')), hub: d ? d.hub : (basis.hub || null),
       done: !!doneLog, log: basis, attempts: logs.length, reached,
-      result: itemResult(key, basis.created_at, ctx),
+      result: itemResult(key, basis.created_at, ctx, basis),
     };
   });
 }
@@ -583,7 +693,12 @@ function impactSummary(ctx) {
   const backDays = rent.filter(x => x.reached && x.result.state === 'back').map(x => x.result.daysToReturn).sort((a, b) => a - b);
   const median = backDays.length ? backDays[Math.floor((backDays.length - 1) / 2)] : null;
 
-  const connectedLogs = (ctx.logs || []).filter(l => l.call_status === 'Connected');
+  const isSvc = l => (l.item_keys || []).length > 0 && l.item_keys.every(k => k.startsWith('svc|'));
+  const connectedLogs = (ctx.logs || []).filter(l => l.call_status === 'Connected' && !isSvc(l));
+  const svcOutcomes = {}; SERVICE_OUTCOMES.forEach(o => { svcOutcomes[o] = 0; });
+  const svcLogs = (ctx.logs || []).filter(isSvc);
+  svcLogs.filter(l => l.call_status === 'Connected').forEach(l => { if (l.outcome) svcOutcomes[l.outcome] = (svcOutcomes[l.outcome] || 0) + 1; });
+  const svcCalled = called.filter(x => x.cat === 'svc');
   const reasons = {}; REASONS.forEach(r => { reasons[r] = 0; });
   connectedLogs.forEach(l => { if (l.reason) reasons[l.reason] = (reasons[l.reason] || 0) + 1; });
   const outcomes = {}; OUTCOMES.forEach(o => { outcomes[o] = 0; });
@@ -598,11 +713,42 @@ function impactSummary(ctx) {
     if (istDateOf(l.created_at) === ctx.today) c.today++;
   });
 
+  // Never called: lapses, joiners and exit notices since PORTAL_START with no call logged at all.
+  // A lapse that ended without a call (driver paid first) dropped off the list but counts here.
+  const loggedPrefixes = new Set();
+  (ctx.logs || []).forEach(l => (l.item_keys || []).forEach(k => { const p = k.split('|'); loggedPrefixes.add(p.slice(0, 3).join('|')); }));
+  const nc = { rent: { total: 0, ok: 0, decided: 0 }, join: { total: 0, ok: 0, decided: 0 }, exit: { total: 0, ok: 0, decided: 0 } };
+  const ncTier = {}; RENT_TIERS.forEach(t => { ncTier[t] = { total: 0, ok: 0, decided: 0 }; });
+  Object.values(ctx.drivers || {}).forEach(d => {
+    rentEpisodes(d, ctx.ref).forEach(e => {
+      if (loggedPrefixes.has(`rent|${d.id}|${e.anchor}`)) return;
+      [nc.rent, ncTier[e.tier]].forEach(g => { g.total++; g.decided++; if (!e.open) g.ok++; });
+    });
+    const jc = joinerCohort(d, ctx.today);
+    if (jc && !loggedPrefixes.has(`join|${d.id}|${jc.anchor}`)) {
+      const r = itemResult(`join|${d.id}|${jc.anchor}|${jc.tier}`, null, ctx);
+      nc.join.total++; if (r.state === 'continued' || r.state === 'dropped') nc.join.decided++; if (r.state === 'continued') nc.join.ok++;
+    }
+  });
+  const exitMatch = makeMatcher(ctx.drivers || {});
+  (ctx.exits || []).forEach(e => {
+    if (!e || !e.lastWorkingDate || /reject|withdraw|cancel/i.test(e.status || '') || e.lastWorkingDate < PORTAL_START) return;
+    const m = exitMatch(e.driverFeId, e.driverName);
+    const who = m.id || ('name:' + normName(e.driverName));
+    if (loggedPrefixes.has(`exit|${who}|${e.lastWorkingDate}`)) return;
+    const r = itemResult(`exit|${who}|${e.lastWorkingDate}`, null, ctx);
+    nc.exit.total++; if (r.state === 'stayed' || r.state === 'left') nc.exit.decided++; if (r.state === 'stayed') nc.exit.ok++;
+  });
+  [nc.rent, nc.join, nc.exit].concat(Object.values(ncTier)).forEach(g => { g.rate = rate(g.ok, g.decided); });
+  // exit prefix has only 3 parts already; joiner/rent prefixes drop the step so any step counts as called
+
   return {
+    notCalled: nc, notCalledByTier: ncTier,
     rent: grp(rent, ['back']), rentByTier: byTier, medianDaysToReturn: median,
     join: grp(called.filter(x => x.cat === 'join'), ['continued'], ['continued', 'dropped']),
     exit: grp(called.filter(x => x.cat === 'exit'), ['stayed'], ['stayed', 'left']),
     reasons, outcomes, callers, totalCalls: (ctx.logs || []).length,
+    svc: { called: svcCalled.length, reached: svcCalled.filter(x => x.reached).length, outcomes: svcOutcomes },
   };
 }
 
@@ -617,6 +763,8 @@ function leavesFor(driverId, name, ctx) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
+  SERVICE_OUTCOMES, MASTER_VEHICLES, parseServiceTracker, sheetDay, normReg, driversOnVehicle,
+  PORTAL_START, rentEpisodes, joinerCohort,
   DATA_START_DATE, RENT_TIERS, JOIN_TIERS, CALL_STATUSES, OUTCOMES, REASONS, CALLERS, HUBS,
   addDays, daysBetween, rangeDays, istDateOf, istWallMs, parseAnyDate, toDateStr, txnTimeMs, driverIdOf, hubKeyFromPayout,
   buildTxns, buildDrivers, buildSessions, makeMatcher, buildItems, buildQueue, calledItems, itemResult,
@@ -630,14 +778,15 @@ const SUPABASE_URL = 'https://lplxkdjqivknvhmtmdux.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_e6t8GrHCcaMyBJMoBZydSg_Ot8fi551';
 const CALLS_TABLE = 'calling_portal_calls';
 const LEAVE_KEY = '1900-01-06', EXIT_KEY = '1900-01-07';
-const SESSION_DAYS = 14;
+const SESSION_DAYS = 16;
+const MAINTENANCE_SHEET_ID = '1w0wODcvdp1_iMmcKZDFLxsb55mh27SotsXZfUK0ZtU0';
 
 let sb = null;
 try { sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null; } catch (e) { sb = null; }
 
 const S = {
   drivers: {}, sessions: {}, leaves: [], exits: [], logs: [], today: null, ref: null,
-  leaveUploadedAt: null, tableMissing: false, loadError: null,
+  leaveUploadedAt: null, tableMissing: false, loadError: null, services: [], svcError: null, svcSource: null,
   view: 'queue', catFilter: null, hub: null, doneCat: null, doneCaller: null, current: null,
 };
 
@@ -653,7 +802,7 @@ function money(v) { return v === null || v === undefined ? '-' : '₹' + Number(
 function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
-function ctx() { return { drivers: S.drivers, sessions: S.sessions, leaves: S.leaves, exits: S.exits, logs: S.logs, today: S.today, ref: S.ref }; }
+function ctx() { return { drivers: S.drivers, sessions: S.sessions, leaves: S.leaves, exits: S.exits, logs: S.logs, today: S.today, ref: S.ref, services: S.services }; }
 function hubOk(hubKey) { return !S.hub || hubKey === S.hub; }
 
 // ---------- loading ----------
@@ -680,7 +829,8 @@ async function loadData() {
   S.ref = withLedger.length ? withLedger[withLedger.length - 1] : yesterday;
   const txns = buildTxns(ledgerBySnap);
   S.drivers = buildDrivers(txns);
-  const recent = dates.filter(d => d > addDays(S.ref, -SESSION_DAYS));
+  // sessions back to the day before PORTAL_START: service calls need who drove on each service day
+  const recent = dates.filter(d => d >= addDays(PORTAL_START, -1) || d > addDays(S.ref, -SESSION_DAYS));
   const sessRows = await fetchInChunks(recent, 'snapshot_date, payload');
   const sessBySnap = {}; sessRows.forEach(r => { sessBySnap[r.snapshot_date] = r.payload || []; });
   S.sessions = buildSessions(sessBySnap);
@@ -689,6 +839,33 @@ async function loadData() {
     if (r.snapshot_date === LEAVE_KEY) { S.leaves = r.payload || []; S.leaveUploadedAt = r.created_at; }
     if (r.snapshot_date === EXIT_KEY) { S.exits = r.payload || []; }
   });
+}
+
+// Service_Tracker tab of the maintenance workbook, read the same way the passenger dashboard reads it
+async function loadServices() {
+  try {
+    const url = `https://docs.google.com/spreadsheets/d/${MAINTENANCE_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('Service_Tracker')}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const parsed = parseServiceTracker(parseCSVText(await res.text()));
+    S.services = parsed.vehicles; S.svcSource = parsed.source; S.svcError = null;
+    if (!parsed.vehicles.length) S.svcError = 'The Service_Tracker tab loaded but no vehicle rows were found.';
+  } catch (e) {
+    S.services = []; S.svcError = 'Could not load the Service_Tracker sheet (' + (e.message || e) + '). Service feedback calls are not shown.';
+  }
+}
+function parseCSVText(text) {
+  const rows = []; let row = [], field = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; } else field += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else if (c !== '\r') field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(c => (c || '').trim() !== ''));
 }
 
 async function loadLogs() {
@@ -706,6 +883,7 @@ async function refreshAll(manual) {
   document.getElementById('subLabel').textContent = manual ? 'Refreshing…' : 'Loading data…';
   try {
     await loadData();
+    await loadServices();
     await loadLogs();
     S.loadError = null;
   } catch (e) {
@@ -733,6 +911,7 @@ function renderAll() {
 function renderBanners() {
   const b = [];
   if (S.loadError) b.push(`<div class="banner err">${esc(S.loadError)}</div>`);
+  if (S.svcError) b.push(`<div class="banner warn">${esc(S.svcError)}</div>`);
   if (S.tableMissing) b.push(`<div class="banner err">Calls can't be saved yet: the <code>${CALLS_TABLE}</code> table doesn't exist. Run <code>calling_portal_calls.sql</code> once in Supabase (SQL Editor, paste, Run), then reload.</div>`);
   if (S.ref && S.today && daysBetween(S.ref, S.today) > 1) b.push(`<div class="banner warn">The latest ledger upload is for ${shortDate(S.ref)}. Days without rent are counted to that date, so a driver who paid since then may still be listed.</div>`);
   document.getElementById('banners').innerHTML = b.join('');
@@ -756,12 +935,14 @@ function itemBadge(it) {
   if (it.cat === 'rent') return `<span class="badge b-rent${it.tier}">Rent not paid ${it.tier}+ days</span>`;
   if (it.cat === 'join') return `<span class="badge b-join">New joiner day ${it.tier}</span>`;
   if (it.cat === 'exit') return `<span class="badge b-exit">Exit notice</span>`;
+  if (it.cat === 'svc') return `<span class="badge b-svc">Service feedback${it.tier ? ' #' + it.tier : ''}</span>`;
   return '';
 }
 function keyBadge(cat, tier) { return itemBadge({ cat, tier }); }
 function itemLabel(it) {
   if (it.cat === 'rent') return `Rent not paid ${it.tier}+ days`;
   if (it.cat === 'join') return `New joiner day ${it.tier}`;
+  if (it.cat === 'svc') return it.vehicle ? `Service ${it.tier} feedback (${it.vehicle})` : 'Service feedback';
   return 'Exit notice';
 }
 
@@ -794,15 +975,18 @@ function renderQueue() {
     <div class="kpi-group"><div class="glabel">Rent not paid</div><div class="kpis k3">
       ${card('rent', 3, '3 days', '3 to 4 days', 'c-amber')}
       ${card('rent', 5, '5 days', '5 to 9 days', 'c-rose')}
-      ${card('rent', 10, '10 days', '10 to 30 days', 'c-deep')}
+      ${card('rent', 10, '10 days', '10 days or more', 'c-deep')}
     </div></div>
     <div class="kpi-group"><div class="glabel">New joiner feedback</div><div class="kpis k3">
-      ${card('join', 3, 'Day 3', 'open on day 3 and 4', 'c-blue')}
-      ${card('join', 5, 'Day 5', 'open day 5 to 9', 'c-blue')}
-      ${card('join', 10, 'Day 10', 'open day 10 to 14', 'c-blue')}
+      ${card('join', 3, 'Day 3', 'on day 3 or 4', 'c-blue')}
+      ${card('join', 5, 'Day 5', 'on day 5 to 9', 'c-blue')}
+      ${card('join', 10, 'Day 10', 'day 10 or later', 'c-blue')}
     </div></div>
     <div class="kpi-group"><div class="glabel">Retention</div><div class="kpis k1">
       ${card('exit', null, 'Exit notice', 'before last working day', 'c-purple')}
+    </div></div>
+    <div class="kpi-group"><div class="glabel">Service</div><div class="kpis k1">
+      ${card('svc', null, 'Service feedback', 'from the day after service', 'c-svc')}
     </div></div>`;
   renderQueueTable();
 }
@@ -826,16 +1010,17 @@ function renderQueueTable() {
     el.innerHTML = `<div class="empty">${S.ref ? 'Nobody to call here right now.' : 'Waiting for data.'}</div>`;
     return;
   }
-  el.innerHTML = `<table><thead><tr><th>Driver</th><th class="hide-sm">Hub</th><th>Phone</th><th>Why call</th><th class="hide-sm">Last rent</th><th class="ctr">Tries</th><th class="hide-sm">Last try</th><th></th></tr></thead><tbody>` +
+  el.innerHTML = `<table><thead><tr><th>Driver</th><th class="hide-sm">Hub</th><th>Phone</th><th>Why call</th><th class="hide-sm">Last rent</th><th class="hide-sm">Waiting since</th><th class="ctr">Tries</th><th class="hide-sm">Last try</th><th></th></tr></thead><tbody>` +
     rows.map(r => {
       const d = r.driverId ? S.drivers[r.driverId] : null;
       const last = r.lastAttempt;
       return `<tr class="queue-row ${r.triedToday ? 'tried' : ''}">
-        <td><div class="driver-name">${esc(r.name)}</div><div class="driver-sub">${esc(r.driverId || 'not matched to ledger')}</div></td>
+        <td><div class="driver-name">${esc(r.driverId ? r.name : (r.items[0].cat === 'svc' ? 'No driver found' : r.name))}</div><div class="driver-sub">${esc(r.driverId || (r.items[0].cat === 'svc' ? (r.items[0].matchHow === 'nodata' ? 'check-in data not uploaded yet for ' + r.items[0].vehicle : 'no check-in on ' + r.items[0].vehicle + ' that day') : 'not matched to ledger'))}${r.items[0].cat === 'svc' && r.driverId ? ' · ' + esc(r.items[0].vehicle) : ''}</div></td>
         <td class="hide-sm">${esc(r.hub ? hubShort(r.hub) : '-')}</td>
         <td class="mono" style="font-size:12px;">${esc(r.phone || '-')}</td>
         <td>${r.items.map(itemBadge).join('')}</td>
         <td class="hide-sm mono" style="font-size:12px;">${d && d.lastTopup ? shortDate(d.lastTopup) : '-'}</td>
+        <td class="hide-sm mono" style="font-size:12px;">${r.openSince ? shortDate(r.openSince) + (daysBetween(r.openSince, S.today) > 0 ? `<div class="driver-sub">${daysBetween(r.openSince, S.today)}d</div>` : '') : '-'}</td>
         <td class="ctr mono">${r.attempts.length}</td>
         <td class="hide-sm" style="font-size:12px;">${last ? `${esc(last.call_status)}<div class="driver-sub">${esc(last.caller)}, ${callTime(last.created_at)}</div>` : '<span class="driver-sub">not called</span>'}</td>
         <td><button class="call-now" onclick="openRow('${esc(r.rowKey)}')">Call now</button></td>
@@ -861,6 +1046,7 @@ const ASK = {
   rent: 'Ask why rent has not been paid, whether anything is wrong (vehicle, hub, earnings, health), and when they will be back.',
   join: 'Ask how the first days went: vehicle, hub, earnings, Rapido rides, and anything that is bothering them.',
   exit: 'Ask why they are leaving and whether anything would make them stay.',
+  svc: 'Ask how the service went: how long it took, and whether anything new is wrong with the vehicle since.',
 };
 
 function renderModal() {
@@ -872,10 +1058,25 @@ function renderModal() {
   cur.lastRow = row;
   const d = row.driverId ? S.drivers[row.driverId] : null;
   const ses = row.driverId ? S.sessions[row.driverId] : null;
-  document.getElementById('mName').textContent = row.name || 'Unknown driver';
+  const isSvc = row.items[0].cat === 'svc';
+  document.getElementById('mName').textContent = row.driverId ? row.name : (isSvc ? 'No driver found for ' + row.items[0].vehicle : (row.name || 'Unknown driver'));
   document.getElementById('mSub').textContent = [row.driverId || 'Not matched to the ledger', row.hub ? hubShort(row.hub) : null, row.phone].filter(Boolean).join(' · ');
   document.getElementById('mCall').innerHTML = row.phone ? `<a class="call-btn" href="tel:${esc(String(row.phone).replace(/[^\d+]/g, ''))}">Call ${esc(row.phone)}</a>` : '';
 
+  let svcHtml = '';
+  if (isSvc) {
+    const it = row.items[0];
+    const hist = (it.serviceHistory || []).slice().sort((a, b) => b.num - a.num);
+    svcHtml = `<div class="facts">
+      <div class="fact"><div class="k">Vehicle</div><div class="v">${esc(it.vehicle)}</div></div>
+      <div class="fact"><div class="k">Service</div><div class="v">#${esc(it.tier)}</div></div>
+      <div class="fact"><div class="k">Done on</div><div class="v">${esc(shortDate(it.anchor))}${it.service && it.service.doneKm ? ' at ' + esc(it.service.doneKm) + ' km' : ''}</div></div></div>
+      ${it.driverId ? '' : `<div class="banner warn">${it.matchHow === 'nodata' ? 'Check-in data for ' + esc(shortDate(it.anchor)) + ' is not uploaded yet, so the driver is not known.' : 'No passenger driver checked in on this vehicle on ' + esc(shortDate(it.anchor)) + '. Check with the hub who had it.'}</div>`}
+      <div class="sub-h">Service history, ${esc(it.vehicle)}</div>
+      <div class="tbl-wrap" style="margin-bottom:14px;"><div class="tbl-scroll"><table class="hist"><thead><tr><th>Service #</th><th>Due</th><th>Done on</th><th class="num">Done at KM</th></tr></thead><tbody>
+      ${hist.map(h => `<tr${h.num === it.tier ? ' style="font-weight:600;"' : ''}><td class="mono">${h.num}</td><td>${h.dueDate ? esc(shortDate(h.dueDate)) : '-'}</td><td>${h.doneDate ? esc(shortDate(h.doneDate)) : (h.rawDone ? esc(h.rawDone) : 'not done')}</td><td class="num">${esc(h.doneKm || '-')}</td></tr>`).join('')}
+      </tbody></table></div></div>`;
+  }
   const why = row.items.map(it => `<div class="why-item">${itemBadge(it)} ${esc(it.detail)}${it.matchHow === 'ambiguous' ? ' <span class="badge b-bad">name shared by several drivers, check who this is</span>' : ''}${it.matchHow === 'none' ? ' <span class="badge b-wait">name not found in ledger</span>' : ''}<div class="ask">${esc(ASK[it.cat])}</div></div>`).join('');
 
   const gap = d && d.lastTopup ? daysBetween(d.lastTopup, S.ref) : null;
@@ -907,7 +1108,8 @@ function renderModal() {
   const leaves = leavesFor(row.driverId, row.name, ctx());
   const leaveHtml = leaves.length ? `<div class="sub-h">Leave on file</div><div class="tbl-wrap"><table class="hist"><tbody>${leaves.map(l => `<tr><td>${shortDate(l.startDate)} to ${shortDate(l.endDate)}</td><td>${esc(l.reason || '')}</td></tr>`).join('')}</tbody></table></div>` : '';
 
-  const allLogs = S.logs.filter(l => (row.driverId && l.driver_id === row.driverId) || (!row.driverId && (l.driver_name || '').toLowerCase() === String(row.name).toLowerCase()));
+  const rowKeys = new Set(row.items.map(i => i.key));
+  const allLogs = S.logs.filter(l => (row.driverId && l.driver_id === row.driverId) || (l.item_keys || []).some(k => rowKeys.has(k)) || (!row.driverId && !isSvc && (l.driver_name || '').toLowerCase() === String(row.name).toLowerCase()));
   const histHtml = `<div class="sub-h">Previous calls</div>` + (allLogs.length
     ? `<div class="tbl-wrap"><div class="tbl-scroll"><table class="hist"><thead><tr><th>When</th><th>By</th><th>Status</th><th>Outcome / reason</th><th>Comment</th></tr></thead><tbody>${allLogs.slice().reverse().map(l => `<tr><td style="white-space:nowrap;">${callTime(l.created_at)}${l.done ? ' <span class="badge b-ok">done</span>' : ''}</td><td>${esc(l.caller)}</td><td>${esc(l.call_status)}</td><td>${esc([l.outcome, l.comeback_date ? 'on ' + shortDate(l.comeback_date) : null, l.reason].filter(Boolean).join(', ') || '-')}</td><td>${esc(l.comment || '')}</td></tr>`).join('')}</tbody></table></div></div>`
     : `<div class="driver-sub" style="font-size:12.5px;">No calls logged yet.</div>`);
@@ -921,8 +1123,8 @@ function renderModal() {
       <div class="field"><label>Called by</label><div class="seg">${CALLERS.map(c => `<button type="button" class="${f.caller === c ? 'on' : ''}" onclick="setForm('caller','${c}')">${c}</button>`).join('')}</div></div>
       <div class="field"><label for="fStatus">Call status</label><select id="fStatus" onchange="setForm('status', this.value)">${opt(CALL_STATUSES, f.status, 'Choose status')}</select></div>
       ${connected ? `
-      <div class="field"><label for="fOutcome">Outcome</label><select id="fOutcome" onchange="setForm('outcome', this.value)">${opt(OUTCOMES, f.outcome, 'Choose outcome')}</select></div>
-      <div class="field"><label for="fReason">Main reason (if not driving or not paying)</label><select id="fReason" onchange="setForm('reason', this.value)">${opt(REASONS, f.reason, 'None / not applicable')}</select></div>
+      <div class="field"><label for="fOutcome">${isSvc ? 'Service feedback' : 'Outcome'}</label><select id="fOutcome" onchange="setForm('outcome', this.value)">${opt(isSvc ? SERVICE_OUTCOMES : OUTCOMES, f.outcome, isSvc ? 'Choose feedback' : 'Choose outcome')}</select></div>
+      ${isSvc ? '' : `<div class="field"><label for="fReason">Main reason (if not driving or not paying)</label><select id="fReason" onchange="setForm('reason', this.value)">${opt(REASONS, f.reason, 'None / not applicable')}</select></div>`}
       ${f.outcome === 'Coming back' ? `<div class="field"><label for="fBack">Coming back on</label><input type="date" id="fBack" value="${esc(f.comeback)}" min="${S.today}" onchange="setForm('comeback', this.value)"></div>` : ''}
       ` : ''}
       <div class="field full"><label for="fComment">Remark (required)</label><textarea id="fComment" placeholder="${connected ? 'What did the driver say?' : 'e.g. rang twice, no answer'}" oninput="S.current.form.comment=this.value">${esc(f.comment)}</textarea></div>
@@ -935,7 +1137,7 @@ function renderModal() {
     <div class="driver-sub" style="margin-top:8px; font-size:11.5px;">Saving covers: ${row.items.map(itemLabel).map(esc).join(', ')}.</div>
   </div>`;
 
-  document.getElementById('mBody').innerHTML = `<div class="why">${why}</div>${factsHtml}${strip}${leaveHtml}${histHtml}${form}`;
+  document.getElementById('mBody').innerHTML = `<div class="why">${why}</div>${svcHtml}${factsHtml}${strip}${leaveHtml}${histHtml}${form}`;
 }
 
 function setForm(k, v) {
@@ -955,11 +1157,11 @@ async function saveCall() {
   const fail = m => { cur.msg = m; cur.msgCls = 'err'; renderModal(); };
   if (!f.caller) return fail('Choose who made the call.');
   if (!f.status) return fail('Choose the call status.');
-  if (f.status === 'Connected' && !f.outcome) return fail('Choose the outcome.');
+  if (f.status === 'Connected' && !f.outcome) return fail(row.items[0].cat === 'svc' ? 'Choose the service feedback.' : 'Choose the outcome.');
   if (!(f.comment || '').trim()) return fail('Write a remark before saving.');
   const btn = document.getElementById('saveBtn'); btn.disabled = true; btn.textContent = 'Saving…';
   const rec = {
-    driver_id: row.driverId, driver_name: row.name, hub: row.hub, phone: row.phone,
+    driver_id: row.driverId, driver_name: row.driverId ? row.name : (row.items[0].cat === 'svc' ? row.items[0].vehicle : row.name), hub: row.hub, phone: row.phone,
     item_keys: row.items.map(i => i.key), item_labels: row.items.map(itemLabel),
     caller: f.caller, call_status: f.status, outcome: f.outcome || null, reason: f.reason || null,
     comeback_date: f.comeback || null, comment: (f.comment || '').trim(), done: f.status === 'Connected',
@@ -978,7 +1180,7 @@ async function saveCall() {
 
 // ---------- done ----------
 function resultBadge(r) {
-  const cls = { back: 'b-ok', continued: 'b-ok', stayed: 'b-ok', notyet: 'b-wait', pending: 'b-wait', dropped: 'b-bad', left: 'b-bad' }[r.state] || 'b-wait';
+  const cls = { back: 'b-ok', continued: 'b-ok', stayed: 'b-ok', happy: 'b-ok', notyet: 'b-wait', pending: 'b-wait', dropped: 'b-bad', left: 'b-bad', unhappy: 'b-bad' }[r.state] || 'b-wait';
   return `<span class="badge ${cls}">${esc(r.label)}</span>`;
 }
 
@@ -991,17 +1193,18 @@ function renderDone() {
     const den = decided ? sub.filter(x => decided.includes(x.result.state)).length : sub.length;
     return { n: sub.length, good, den, pct: den ? Math.round(good / den * 100) : null };
   };
-  const r = part('rent', ['back']), j = part('join', ['continued'], ['continued', 'dropped']), e = part('exit', ['stayed'], ['stayed', 'left']);
+  const r = part('rent', ['back']), j = part('join', ['continued'], ['continued', 'dropped']), e = part('exit', ['stayed'], ['stayed', 'left']), sv = part('svc', ['happy']);
   const chip = p => p === null ? '' : ` <span class="pct-chip">${p}%</span>`;
   document.getElementById('doneSummary').innerHTML = `
-    <div class="total-card"><div class="label">Done calls</div><div class="value">${all.length}</div><div class="foot">rent ${r.n}, new joiner ${j.n}, exit ${e.n}</div></div>
+    <div class="total-card"><div class="label">Done calls</div><div class="value">${all.length}</div><div class="foot">rent ${r.n}, new joiner ${j.n}, exit ${e.n}, service ${sv.n}</div></div>
     <div class="total-card"><div class="label">Rent: came back</div><div class="value">${r.good}${chip(r.pct)}</div><div class="foot">paid rent after the call, of ${r.den}</div></div>
     <div class="total-card"><div class="label">New joiners continued</div><div class="value">${j.good}${chip(j.pct)}</div><div class="foot">paid rent on or after day 30, of ${j.den} past day 30 or dropped</div></div>
-    <div class="total-card"><div class="label">Exit notices: stayed</div><div class="value">${e.good}${chip(e.pct)}</div><div class="foot">paid rent after last working day, of ${e.den} decided</div></div>`;
+    <div class="total-card"><div class="label">Exit notices: stayed</div><div class="value">${e.good}${chip(e.pct)}</div><div class="foot">paid rent after last working day, of ${e.den} decided</div></div>
+    <div class="total-card"><div class="label">Service: happy</div><div class="value">${sv.good}${chip(sv.pct)}</div><div class="foot">of ${sv.den} service feedback calls done</div></div>`;
 
   const fb = (key, val, label, kind) => `<button class="filter-btn ${S[kind] === val ? 'active' : ''}" onclick="S.${kind}=${val === null ? 'null' : `'${val}'`}; renderDone();">${label}</button>`;
   document.getElementById('doneFilters').innerHTML =
-    fb('c', null, 'All', 'doneCat') + fb('c', 'rent', 'Rent', 'doneCat') + fb('c', 'join', 'New joiner', 'doneCat') + fb('c', 'exit', 'Exit', 'doneCat') +
+    fb('c', null, 'All', 'doneCat') + fb('c', 'rent', 'Rent', 'doneCat') + fb('c', 'join', 'New joiner', 'doneCat') + fb('c', 'exit', 'Exit', 'doneCat') + fb('c', 'svc', 'Service', 'doneCat') +
     '<span style="width:10px;"></span>' + fb('p', null, 'Both callers', 'doneCaller') + CALLERS.map(c => fb('p', c, c, 'doneCaller')).join('');
 
   let rows = all;
@@ -1012,7 +1215,7 @@ function renderDone() {
   if (!rows.length) { el.innerHTML = `<div class="empty">No done calls ${S.doneCat || S.doneCaller ? 'match this filter' : 'yet. Connected calls with a remark show up here'}.</div>`; return; }
   el.innerHTML = `<table><thead><tr><th>Driver</th><th>Call</th><th>Called</th><th>Status</th><th>Outcome / reason</th><th class="hide-sm">Comment</th><th>Result</th></tr></thead><tbody>` +
     rows.map(x => `<tr>
-      <td><div class="driver-name">${esc(x.name)}</div><div class="driver-sub">${esc(x.driverId || '')}${x.hub ? ' · ' + esc(hubShort(x.hub)) : ''}</div></td>
+      <td><div class="driver-name">${esc(x.name)}</div><div class="driver-sub">${esc(x.driverId || '')}${x.hub ? ' · ' + esc(hubShort(x.hub)) : ''}${x.vehicle ? ' · ' + esc(x.vehicle) : ''}</div></td>
       <td>${keyBadge(x.cat, x.tier)}</td>
       <td style="white-space:nowrap; font-size:12px;">${callTime(x.log.created_at)}<div class="driver-sub">${esc(x.log.caller)}${x.attempts > 1 ? `, ${x.attempts} tries` : ''}</div></td>
       <td style="font-size:12.5px;">${esc(x.log.call_status)}</td>
@@ -1028,8 +1231,8 @@ function renderImpact() {
   const I = impactSummary({ ...c, logs: hubLogs });
   const cell = g => g.decided ? `${g.ok} of ${g.decided}` : '-';
   const pct = g => g.rate === null ? '-' : `<b>${g.rate}%</b>`;
-  const cmpRow = (label, g) => `<tr><td>${label}</td><td class="num">${g.reached.total}</td><td class="num">${cell(g.reached)}</td><td class="num">${pct(g.reached)}</td><td class="num">${g.notReached.total}</td><td class="num">${cell(g.notReached)}</td><td class="num">${pct(g.notReached)}</td></tr>`;
-  const cmpHead = `<thead><tr><th></th><th class="num">Reached</th><th class="num">Result</th><th class="num">Rate</th><th class="num">Not reached</th><th class="num">Result</th><th class="num">Rate</th></tr></thead>`;
+  const cmpRow = (label, g, n) => `<tr><td>${label}</td><td class="num">${g.reached.total}</td><td class="num">${cell(g.reached)}</td><td class="num">${pct(g.reached)}</td><td class="num">${g.notReached.total}</td><td class="num">${cell(g.notReached)}</td><td class="num">${pct(g.notReached)}</td><td class="num">${n.total}</td><td class="num">${n.decided ? n.ok + ' of ' + n.decided : '-'}</td><td class="num">${pct(n)}</td></tr>`;
+  const cmpHead = `<thead><tr><th></th><th class="num">Reached</th><th class="num">Result</th><th class="num">Rate</th><th class="num">Not reached</th><th class="num">Result</th><th class="num">Rate</th><th class="num">Never called</th><th class="num">Result</th><th class="num">Rate</th></tr></thead>`;
   const bars = obj => {
     const entries = Object.entries(obj).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
     const max = Math.max(1, ...entries.map(e => e[1]));
@@ -1039,18 +1242,20 @@ function renderImpact() {
     <div class="section"><div class="section-head"><h2>Does reaching the driver help?</h2>
       <span class="note">reached = connected on at least one try · not reached = only RNR, switched off, busy or wrong number</span></div>
       <div class="tbl-wrap"><div class="tbl-scroll"><table>${cmpHead}<tbody>
-        ${cmpRow('Rent not paid: came back', I.rent)}
-        ${RENT_TIERS.map(t => cmpRow(`&nbsp;&nbsp;at ${t}+ days`, I.rentByTier[t])).join('')}
-        ${cmpRow('New joiners: continued past day 30', I.join)}
-        ${cmpRow('Exit notice: stayed', I.exit)}
+        ${cmpRow('Rent not paid: came back', I.rent, I.notCalled.rent)}
+        ${RENT_TIERS.map(t => cmpRow(`&nbsp;&nbsp;at ${t}+ days`, I.rentByTier[t], I.notCalledByTier[t])).join('')}
+        ${cmpRow('New joiners: continued past day 30', I.join, I.notCalled.join)}
+        ${cmpRow('Exit notice: stayed', I.exit, I.notCalled.exit)}
       </tbody></table></div></div>
-      <div class="note" style="margin-top:8px;">Came back = rent paid after the call. New joiner and exit rates count only drivers whose result is known (past day 30 or dropped; stayed or left).
+      <div class="note" style="margin-top:8px;">Never called = came up since ${shortDate(PORTAL_START)} with no call logged, including rent lapses that dropped off because the driver paid first. Those often resolve before anyone could call, so this group skews towards coming back.<br>Came back = rent paid after the call. New joiner and exit rates count only drivers whose result is known (past day 30 or dropped; stayed or left).
       ${I.medianDaysToReturn !== null ? ` Reached drivers who came back took a median of ${I.medianDaysToReturn} day${I.medianDaysToReturn === 1 ? '' : 's'}.` : ''}</div>
     </div>
     <div class="section grid2">
       <div class="card"><h3>Why drivers stop (connected calls)</h3>${bars(I.reasons)}</div>
       <div class="card"><h3>What drivers said</h3>${bars(I.outcomes)}</div>
     </div>
+    <div class="section"><div class="card"><h3>Service feedback</h3>
+      <div class="note" style="margin-bottom:8px;">${I.svc.called} service calls made, ${I.svc.reached} reached</div>${bars(I.svc.outcomes)}</div></div>
     <div class="section"><div class="section-head"><h2>Callers</h2></div>
       <div class="tbl-wrap"><table><thead><tr><th>Caller</th><th class="num">Today</th><th class="num">All calls</th><th class="num">Connected</th><th class="num">Connect rate</th><th class="num">Marked done</th></tr></thead><tbody>
       ${Object.entries(I.callers).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v.today}</td><td class="num">${v.calls}</td><td class="num">${v.connected}</td><td class="num">${v.calls ? Math.round(v.connected / v.calls * 100) + '%' : '-'}</td><td class="num">${v.done}</td></tr>`).join('')}
