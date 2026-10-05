@@ -49,7 +49,7 @@ button,select,input,textarea{font:inherit;}
 .section-head h2{font-size:19px; font-weight:600;}
 .note{font-size:12px; color:var(--ink-dim); font-family:'IBM Plex Mono',monospace;}
 
-.kpi-groups{display:grid; grid-template-columns:3fr 3fr 1fr 1fr; gap:14px;}
+.kpi-groups{display:grid; grid-template-columns:3fr 3fr 1fr 1fr 1fr; gap:14px;}
 .kpi-group .glabel{font-size:12px; color:var(--ink-dim); margin:0 0 6px 2px; font-weight:500;}
 .kpis{display:grid; gap:10px;}
 .kpis.k3{grid-template-columns:repeat(3,1fr);}
@@ -61,7 +61,7 @@ button,select,input,textarea{font:inherit;}
 .kpi .value{font-family:'IBM Plex Mono',monospace; font-size:28px; font-weight:600; margin-top:6px;}
 .kpi .foot{font-size:11px; color:var(--ink-dim); margin-top:4px;}
 .kpi.c-amber{color:var(--amber);} .kpi.c-rose{color:var(--rose);} .kpi.c-deep{color:#9f1239;}
-.kpi.c-svc{color:#0f766e;} .kpi.c-blue{color:var(--blue);} .kpi.c-teal{color:var(--teal);} .kpi.c-purple{color:var(--purple);}
+.kpi.c-svc{color:#0f766e;} .kpi.c-lead{color:#be185d;} .kpi.c-blue{color:var(--blue);} .kpi.c-teal{color:var(--teal);} .kpi.c-purple{color:var(--purple);}
 
 .tbl-wrap{background:var(--panel); border:1px solid var(--line); border-radius:14px; overflow:hidden;}
 .tbl-scroll{overflow-x:auto;}
@@ -86,6 +86,7 @@ th.ctr,td.ctr{text-align:center;}
 .b-rent10{background:rgba(159,18,57,0.14); color:#9f1239;}
 .b-join{background:rgba(37,99,235,0.12); color:var(--blue);}
 .b-exit{background:rgba(124,58,237,0.12); color:var(--purple);}
+.b-lead{background:rgba(219,39,119,0.12); color:#be185d;}
 .b-svc{background:rgba(15,118,110,0.12); color:#0f766e;}
 .b-ok{background:rgba(15,157,104,0.12); color:var(--teal);}
 .b-bad{background:rgba(213,56,79,0.12); color:var(--rose);}
@@ -267,6 +268,7 @@ const OUTCOMES = ['Coming back', 'Will pay rent today', 'On leave', 'Wants to ex
 const REASONS = ['Vehicle issue', 'Charging issue', 'Low earnings', 'Health', 'Family / village',
   'Joined another fleet or platform', 'Issue with hub staff', 'Other'];
 const CALLERS = ['Jyoti', 'Swati'];
+const LEAD_OUTCOMES = ['Interested in Passenger', 'Interested in Cargo', 'Not Interested'];
 const SERVICE_OUTCOMES = ['Happy with service', 'Took too long', 'New problem after service', 'Other'];
 // Passenger vehicles, copied from the passenger dashboard's MASTER_VEHICLE_LIST (138 vehicles).
 // Update both together when vehicles are added or removed.
@@ -396,6 +398,51 @@ function parseServiceTracker(rows) {
     out.push({ vehicle, history });
   });
   return { vehicles: out, source };
+}
+
+function phone10(v) { const d = String(v === null || v === undefined ? '' : v).replace(/\D/g, ''); return d.length >= 10 ? d.slice(-10) : null; }
+
+// Instagram lead form (Google Form responses). Columns are found by header; the timestamp is
+// month-first as Google Forms writes it ("10/3/2026 17:14:16" = 3 Oct 2026).
+function parseLeadForm(rows) {
+  rows = rows || [];
+  let hi = rows.findIndex(r => (r || []).some(c => /timestamp/i.test(c || '')));
+  const H = hi >= 0 ? rows[hi] : [];
+  const col = (re, fb) => { const i = H.findIndex(c => re.test(c || '')); return i >= 0 ? i : fb; };
+  const C = { ts: col(/timestamp/i, 0), name: col(/name|नाम/i, 1), phone: col(/phone|mobile|मोबाइल/i, 2),
+    gender: col(/gender|लिंग/i, 3), age: col(/\bage\b|उम्र/i, 4), city: col(/city|शहर/i, 5) };
+  const seen = {};
+  rows.slice(hi + 1).forEach(r => {
+    const ph = phone10(r[C.phone]);
+    if (!ph) return;
+    const m = String(r[C.ts] || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    const date = m ? utcToDateStr(Date.UTC(+m[3], +m[1] - 1, +m[2])) : sheetDay(r[C.ts]);
+    if (!date) return;
+    const lead = { phone: ph, date, rawTs: String(r[C.ts] || '').trim(), name: String(r[C.name] || '').trim(),
+      gender: String(r[C.gender] || '').trim(), age: String(r[C.age] || '').trim(), city: String(r[C.city] || '').trim(), submissions: 1 };
+    if (!seen[ph]) seen[ph] = lead;
+    else { seen[ph].submissions++; if (date < seen[ph].date) Object.assign(seen[ph], lead, { submissions: seen[ph].submissions }); }
+  });
+  return Object.values(seen);
+}
+
+// Rent paid by phone number across the whole ledger (passenger and cargo), for lead conversion
+function buildPhoneRent(ledgerBySnapshot) {
+  const P = {};
+  Object.keys(ledgerBySnapshot || {}).forEach(snap => (ledgerBySnapshot[snap] || []).forEach(r => {
+    if (!r || r.paymentType !== 'TOPUP') return;
+    const ph = phone10(r.phone), date = toDateStr(r.createdDate);
+    if (!ph || !date) return;
+    const p = P[ph] || (P[ph] = { dates: [], driver: r.driver, payout: r.payout });
+    if (!p.dates.includes(date)) p.dates.push(date);
+  }));
+  Object.values(P).forEach(p => p.dates.sort());
+  return P;
+}
+function leadOnboarded(lead, phoneRent) {
+  const p = phoneRent ? phoneRent[lead.phone] : null;
+  const d = p ? p.dates.find(x => x >= lead.date) : null;
+  return d ? { date: d, driver: p.driver, payout: p.payout } : null;
 }
 
 function numOrNull(v) { return (v === undefined || v === null || v === '' || isNaN(Number(v))) ? null : Number(v); }
@@ -567,6 +614,13 @@ function buildItems(ctx) {
         unmatchedName: v.vehicle, matchHow: ref < h.doneDate ? 'nodata' : 'nocheckin', detail: what });
     });
   });
+  // Instagram leads: open until called (connected + remark) or the number pays rent
+  (ctx.leads || []).forEach(l => {
+    if (l.date < PORTAL_START || leadOnboarded(l, ctx.phoneRent)) return;
+    items.push({ key: `lead|ph:${l.phone}|${l.date}`, cat: 'lead', tier: null, driverId: null, unmatchedName: l.name || l.phone,
+      phone: l.phone, lead: l, anchor: l.date, openSince: l.date,
+      detail: `Filled the Instagram form on ${fmtDay(l.date)}${l.city ? ', city: ' + l.city : ''}${l.submissions > 1 ? ` (${l.submissions} times)` : ''}` });
+  });
   return items;
 }
 
@@ -581,6 +635,7 @@ function logsByItem(logs) {
 const CAT_RANK = { rent: 3, exit: 2, join: 1 };
 function itemScore(it) {
   if (it.cat === 'svc') return 150;
+  if (it.cat === 'lead') return 200;
   if (it.cat === 'rent') return 300 + it.tier * 10 + Math.min(it.gap, 30);
   if (it.cat === 'exit') return 250;
   return 100 + it.tier;
@@ -592,7 +647,7 @@ function buildQueue(ctx) {
   const open = items.filter(it => !(byItem[it.key] || []).some(l => l.done));
   const rows = {};
   open.forEach(it => {
-    const rk = it.cat === 'svc' ? `svc:${it.driverId || 'veh'}:${it.vehicle}:${it.anchor}:${it.tier}`
+    const rk = it.cat === 'lead' ? `lead:${it.phone}` : it.cat === 'svc' ? `svc:${it.driverId || 'veh'}:${it.vehicle}:${it.anchor}:${it.tier}`
       : (it.driverId || ('name:' + normName(it.unmatchedName)));
     const r = rows[rk] || (rows[rk] = { rowKey: rk, driverId: it.driverId, name: null, items: [], attempts: [] });
     r.items.push(it);
@@ -602,7 +657,7 @@ function buildQueue(ctx) {
     const d = r.driverId ? ctx.drivers[r.driverId] : null;
     r.name = d ? d.name : r.items[0].unmatchedName;
     r.hub = d ? d.hub : null;
-    r.phone = d ? d.phone : null;
+    r.phone = d ? d.phone : (r.items[0].phone || null);
     r.items.sort((a, b) => itemScore(b) - itemScore(a));
     r.attempts.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
     r.lastAttempt = r.attempts[r.attempts.length - 1] || null;
@@ -630,7 +685,11 @@ function parseItemKey(k) {
 // The result of one called item, judged against the ledger. refIso = time of the call used.
 function itemResult(key, callIso, ctx, log) {
   const pk = parseItemKey(key);
-  const id = /^(name|veh):/.test(pk.who) ? null : pk.who;
+  const id = /^(name|veh|ph):/.test(pk.who) ? null : pk.who;
+  if (pk.cat === 'lead') {
+    const on = leadOnboarded({ phone: pk.who.slice(3), date: pk.anchor }, ctx.phoneRent);
+    return on ? { state: 'onboarded', label: `Onboarded, paid rent ${fmtDay(on.date)}` } : { state: 'notyet', label: 'Not onboarded yet' };
+  }
   if (pk.cat === 'svc') {
     if (!log || log.call_status !== 'Connected') return { state: 'notyet', label: 'Not reached' };
     if (log.outcome === 'Happy with service') return { state: 'happy', label: 'Happy with service' };
@@ -666,12 +725,12 @@ function calledItems(ctx) {
     const last = logs[logs.length - 1];
     const basis = doneLog || last;
     const pk = parseItemKey(key);
-    const id = /^(name|veh):/.test(pk.who) ? null : pk.who;
+    const id = /^(name|veh|ph):/.test(pk.who) ? null : pk.who;
     const d = id ? ctx.drivers[id] : null;
     const reached = logs.some(l => l.call_status === 'Connected');
     return {
       key, cat: pk.cat, tier: pk.tier, anchor: pk.anchor, driverId: id, vehicle: pk.vehicle,
-      name: d ? d.name : (basis.driver_name || pk.who.replace(/^(name|veh):/, '')), hub: d ? d.hub : (basis.hub || null),
+      name: d ? d.name : (basis.driver_name || pk.who.replace(/^(name|veh|ph):/, '')), hub: d ? d.hub : (basis.hub || null),
       done: !!doneLog, log: basis, attempts: logs.length, reached,
       result: itemResult(key, basis.created_at, ctx, basis),
     };
@@ -698,8 +757,24 @@ function impactSummary(ctx) {
   const backDays = rent.filter(x => x.reached && x.result.state === 'back').map(x => x.result.daysToReturn).sort((a, b) => a - b);
   const median = backDays.length ? backDays[Math.floor((backDays.length - 1) / 2)] : null;
 
+  const leadCalled = called.filter(x => x.cat === 'lead');
+  const leadLogs = (ctx.logs || []).filter(l => (l.item_keys || []).some(k => k.startsWith('lead|')));
+  const leadOut = {}; LEAD_OUTCOMES.forEach(o => { leadOut[o] = 0; });
+  leadCalled.forEach(x => { const lastConn = leadLogs.filter(l => l.call_status === 'Connected' && l.item_keys.includes(x.key)).pop(); if (lastConn && lastConn.outcome) leadOut[lastConn.outcome] = (leadOut[lastConn.outcome] || 0) + 1; });
+  const leadGroup = list => ({ total: list.length, onboarded: list.filter(x => x.result.state === 'onboarded').length });
+  const allLeads = (ctx.leads || []).filter(l => l.date >= PORTAL_START);
+  const calledPhones = new Set(leadCalled.map(x => parseItemKey(x.key).who.slice(3)));
+  const neverCalledLeads = allLeads.filter(l => !calledPhones.has(l.phone));
+  const leadsSummary = {
+    total: allLeads.length,
+    reached: leadGroup(leadCalled.filter(x => x.reached)),
+    notReached: leadGroup(leadCalled.filter(x => !x.reached)),
+    neverCalled: { total: neverCalledLeads.length, onboarded: neverCalledLeads.filter(l => leadOnboarded(l, ctx.phoneRent)).length },
+    outcomes: leadOut,
+  };
   const isSvc = l => (l.item_keys || []).length > 0 && l.item_keys.every(k => k.startsWith('svc|'));
-  const connectedLogs = (ctx.logs || []).filter(l => l.call_status === 'Connected' && !isSvc(l));
+  const isLead = l => (l.item_keys || []).some(k => k.startsWith('lead|'));
+  const connectedLogs = (ctx.logs || []).filter(l => l.call_status === 'Connected' && !isSvc(l) && !isLead(l));
   const svcOutcomes = {}; SERVICE_OUTCOMES.forEach(o => { svcOutcomes[o] = 0; });
   const svcLogs = (ctx.logs || []).filter(isSvc);
   svcLogs.filter(l => l.call_status === 'Connected').forEach(l => { if (l.outcome) svcOutcomes[l.outcome] = (svcOutcomes[l.outcome] || 0) + 1; });
@@ -748,7 +823,7 @@ function impactSummary(ctx) {
   // exit prefix has only 3 parts already; joiner/rent prefixes drop the step so any step counts as called
 
   return {
-    notCalled: nc, notCalledByTier: ncTier,
+    notCalled: nc, notCalledByTier: ncTier, leads: leadsSummary,
     rent: grp(rent, ['back']), rentByTier: byTier, medianDaysToReturn: median,
     join: grp(called.filter(x => x.cat === 'join'), ['continued'], ['continued', 'dropped']),
     exit: grp(called.filter(x => x.cat === 'exit'), ['stayed'], ['stayed', 'left']),
@@ -768,6 +843,7 @@ function leavesFor(driverId, name, ctx) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
+  LEAD_OUTCOMES, parseLeadForm, buildPhoneRent, leadOnboarded, phone10,
   SERVICE_OUTCOMES, MASTER_VEHICLES, parseServiceTracker, sheetDay, normReg, driversOnVehicle,
   PORTAL_START, rentEpisodes, joinerCohort,
   DATA_START_DATE, RENT_TIERS, JOIN_TIERS, CALL_STATUSES, OUTCOMES, REASONS, CALLERS, HUBS,
@@ -785,13 +861,14 @@ const CALLS_TABLE = 'calling_portal_calls';
 const LEAVE_KEY = '1900-01-06', EXIT_KEY = '1900-01-07';
 const SESSION_DAYS = 16;
 const MAINTENANCE_SHEET_ID = '1w0wODcvdp1_iMmcKZDFLxsb55mh27SotsXZfUK0ZtU0';
+const LEAD_SHEET_ID = '1BEXa9pFQrHmY5ipZ5RoMtW7dzL1rphALp8J-4EvMvl4', LEAD_SHEET_GID = '593427670';
 
 let sb = null;
 try { sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null; } catch (e) { sb = null; }
 
 const S = {
   drivers: {}, sessions: {}, leaves: [], exits: [], logs: [], today: null, ref: null,
-  leaveUploadedAt: null, tableMissing: false, loadError: null, services: [], svcError: null, svcSource: null,
+  leaveUploadedAt: null, tableMissing: false, loadError: null, services: [], svcError: null, svcSource: null, leads: [], leadError: null, phoneRent: {},
   view: 'queue', catFilter: null, hub: null, doneCat: null, doneCaller: null, current: null,
 };
 
@@ -808,7 +885,7 @@ function money(v) { return v === null || v === undefined ? '-' : '₹' + Number(
 function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
-function ctx() { return { drivers: S.drivers, sessions: S.sessions, leaves: S.leaves, exits: S.exits, logs: S.logs, today: S.today, ref: S.ref, services: S.services }; }
+function ctx() { return { drivers: S.drivers, sessions: S.sessions, leaves: S.leaves, exits: S.exits, logs: S.logs, today: S.today, ref: S.ref, services: S.services, leads: S.leads, phoneRent: S.phoneRent }; }
 function hubOk(hubKey) { return !S.hub || hubKey === S.hub; }
 
 // ---------- loading ----------
@@ -834,6 +911,7 @@ async function loadData() {
   const withLedger = Object.keys(ledgerBySnap).sort();
   S.ref = withLedger.length ? withLedger[withLedger.length - 1] : yesterday;
   const txns = buildTxns(ledgerBySnap);
+  S.phoneRent = buildPhoneRent(ledgerBySnap);
   S.drivers = buildDrivers(txns);
   // sessions back to the day before PORTAL_START: service calls need who drove on each service day
   const recent = dates.filter(d => d >= addDays(PORTAL_START, -1) || d > addDays(S.ref, -SESSION_DAYS));
@@ -858,6 +936,17 @@ async function loadServices() {
     if (!parsed.vehicles.length) S.svcError = 'The Service_Tracker tab loaded but no vehicle rows were found.';
   } catch (e) {
     S.services = []; S.svcError = 'Could not load the Service_Tracker sheet (' + (e.message || e) + '). Service feedback calls are not shown.';
+  }
+}
+// Instagram lead form responses (Google Form), read live like the service tracker
+async function loadLeads() {
+  try {
+    const url = `https://docs.google.com/spreadsheets/d/${LEAD_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${LEAD_SHEET_GID}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    S.leads = parseLeadForm(parseCSVText(await res.text())); S.leadError = null;
+  } catch (e) {
+    S.leads = []; S.leadError = 'Could not load the Instagram lead form sheet (' + (e.message || e) + '). Lead calls are not shown.';
   }
 }
 function parseCSVText(text) {
@@ -890,6 +979,7 @@ async function refreshAll(manual) {
   try {
     await loadData();
     await loadServices();
+    await loadLeads();
     await loadLogs();
     S.loadError = null;
   } catch (e) {
@@ -917,6 +1007,7 @@ function renderAll() {
 function renderBanners() {
   const b = [];
   if (S.loadError) b.push(`<div class="banner err">${esc(S.loadError)}</div>`);
+  if (S.leadError) b.push(`<div class="banner warn">${esc(S.leadError)}</div>`);
   if (S.svcError) b.push(`<div class="banner warn">${esc(S.svcError)}</div>`);
   if (S.tableMissing) b.push(`<div class="banner err">Calls can't be saved yet: the <code>${CALLS_TABLE}</code> table doesn't exist. Run <code>calling_portal_calls.sql</code> once in Supabase (SQL Editor, paste, Run), then reload.</div>`);
   if (S.ref && S.today && daysBetween(S.ref, S.today) > 1) b.push(`<div class="banner warn">The latest ledger upload is for ${shortDate(S.ref)}. Days without rent are counted to that date, so a driver who paid since then may still be listed.</div>`);
@@ -941,6 +1032,7 @@ function itemBadge(it) {
   if (it.cat === 'rent') return `<span class="badge b-rent${it.tier}">Rent not paid ${it.tier}+ days</span>`;
   if (it.cat === 'join') return `<span class="badge b-join">New joiner day ${it.tier}</span>`;
   if (it.cat === 'exit') return `<span class="badge b-exit">Exit notice</span>`;
+  if (it.cat === 'lead') return `<span class="badge b-lead">New lead - Instagram</span>`;
   if (it.cat === 'svc') return `<span class="badge b-svc">Service feedback${it.tier ? ' #' + it.tier : ''}</span>`;
   return '';
 }
@@ -948,6 +1040,7 @@ function keyBadge(cat, tier) { return itemBadge({ cat, tier }); }
 function itemLabel(it) {
   if (it.cat === 'rent') return `Rent not paid ${it.tier}+ days`;
   if (it.cat === 'join') return `New joiner day ${it.tier}`;
+  if (it.cat === 'lead') return 'New lead - Instagram';
   if (it.cat === 'svc') return it.vehicle ? `Service ${it.tier} feedback (${it.vehicle})` : 'Service feedback';
   return 'Exit notice';
 }
@@ -991,6 +1084,9 @@ function renderQueue() {
     <div class="kpi-group"><div class="glabel">Retention</div><div class="kpis k1">
       ${card('exit', null, 'Exit notice', 'last working day from 15 Sep', 'c-purple')}
     </div></div>
+    <div class="kpi-group"><div class="glabel">Leads</div><div class="kpis k1">
+      ${card('lead', null, 'New lead - Instagram', 'until called or onboarded', 'c-lead')}
+    </div></div>
     <div class="kpi-group"><div class="glabel">Service</div><div class="kpis k1">
       ${card('svc', null, 'Service feedback', 'services done from 20 Sep', 'c-svc')}
     </div></div>`;
@@ -1021,7 +1117,7 @@ function renderQueueTable() {
       const d = r.driverId ? S.drivers[r.driverId] : null;
       const last = r.lastAttempt;
       return `<tr class="queue-row ${r.triedToday ? 'tried' : ''}">
-        <td><div class="driver-name">${esc(r.driverId ? r.name : (r.items[0].cat === 'svc' ? 'No driver found' : r.name))}</div><div class="driver-sub">${esc(r.driverId || (r.items[0].cat === 'svc' ? (r.items[0].matchHow === 'nodata' ? 'check-in data not uploaded yet for ' + r.items[0].vehicle : 'no check-in on ' + r.items[0].vehicle + ' that day') : 'not matched to ledger'))}${r.items[0].cat === 'svc' && r.driverId ? ' · ' + esc(r.items[0].vehicle) : ''}</div></td>
+        <td><div class="driver-name">${esc(r.driverId ? r.name : (r.items[0].cat === 'svc' ? 'No driver found' : r.name))}</div><div class="driver-sub">${esc(r.driverId || (r.items[0].cat === 'lead' ? 'Instagram form' + (r.items[0].lead.city ? ', ' + r.items[0].lead.city : '') : r.items[0].cat === 'svc' ? (r.items[0].matchHow === 'nodata' ? 'check-in data not uploaded yet for ' + r.items[0].vehicle : 'no check-in on ' + r.items[0].vehicle + ' that day') : 'not matched to ledger'))}${r.items[0].cat === 'svc' && r.driverId ? ' · ' + esc(r.items[0].vehicle) : ''}</div></td>
         <td class="hide-sm">${esc(r.hub ? hubShort(r.hub) : '-')}</td>
         <td class="mono" style="font-size:12px;">${esc(r.phone || '-')}</td>
         <td>${r.items.map(itemBadge).join('')}</td>
@@ -1052,6 +1148,7 @@ const ASK = {
   rent: 'Ask why rent has not been paid, whether anything is wrong (vehicle, hub, earnings, health), and when they will be back.',
   join: 'Ask how the first days went: vehicle, hub, earnings, Rapido rides, and anything that is bothering them.',
   exit: 'Ask why they are leaving and whether anything would make them stay.',
+  lead: 'Introduce Kadam, ask whether they want to drive passenger or cargo, and invite them to the hub.',
   svc: 'Ask how the service went: how long it took, and whether anything new is wrong with the vehicle since.',
 };
 
@@ -1065,11 +1162,20 @@ function renderModal() {
   const d = row.driverId ? S.drivers[row.driverId] : null;
   const ses = row.driverId ? S.sessions[row.driverId] : null;
   const isSvc = row.items[0].cat === 'svc';
+  const isLead = row.items[0].cat === 'lead';
   document.getElementById('mName').textContent = row.driverId ? row.name : (isSvc ? 'No driver found for ' + row.items[0].vehicle : (row.name || 'Unknown driver'));
-  document.getElementById('mSub').textContent = [row.driverId || 'Not matched to the ledger', row.hub ? hubShort(row.hub) : null, row.phone].filter(Boolean).join(' · ');
+  document.getElementById('mSub').textContent = [row.driverId || (isLead ? 'Instagram lead' : 'Not matched to the ledger'), row.hub ? hubShort(row.hub) : null, row.phone].filter(Boolean).join(' · ');
   document.getElementById('mCall').innerHTML = row.phone ? `<a class="call-btn" href="tel:${esc(String(row.phone).replace(/[^\d+]/g, ''))}">Call ${esc(row.phone)}</a>` : '';
 
   let svcHtml = '';
+  if (isLead) {
+    const l = row.items[0].lead;
+    const inLedger = S.phoneRent[l.phone];
+    svcHtml = `<div class="facts">
+      ${[['Submitted', l.rawTs || shortDate(l.date)], ['Phone', l.phone], ['City', l.city || '-'], ['Gender', l.gender || '-'], ['Age', l.age || '-'], ['Form filled', l.submissions + (l.submissions === 1 ? ' time' : ' times')]]
+        .map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('')}</div>
+      ${inLedger ? `<div class="banner warn">This number is in the ledger as ${esc(inLedger.driver)}, last rent ${esc(shortDate(inLedger.dates[inLedger.dates.length - 1]))}. It shows as onboarded once they pay rent after the form date.</div>` : ''}`;
+  }
   if (isSvc) {
     const it = row.items[0];
     const hist = (it.serviceHistory || []).slice().sort((a, b) => a.num - b.num);
@@ -1131,8 +1237,8 @@ function renderModal() {
       <div class="field"><label>Called by</label><div class="seg">${CALLERS.map(c => `<button type="button" class="${f.caller === c ? 'on' : ''}" onclick="setForm('caller','${c}')">${c}</button>`).join('')}</div></div>
       <div class="field"><label for="fStatus">Call status</label><select id="fStatus" onchange="setForm('status', this.value)">${opt(CALL_STATUSES, f.status, 'Choose status')}</select></div>
       ${connected ? `
-      <div class="field"><label for="fOutcome">${isSvc ? 'Service feedback' : 'Outcome'}</label><select id="fOutcome" onchange="setForm('outcome', this.value)">${opt(isSvc ? SERVICE_OUTCOMES : OUTCOMES, f.outcome, isSvc ? 'Choose feedback' : 'Choose outcome')}</select></div>
-      ${isSvc ? '' : `<div class="field"><label for="fReason">Main reason (if not driving or not paying)</label><select id="fReason" onchange="setForm('reason', this.value)">${opt(REASONS, f.reason, 'None / not applicable')}</select></div>`}
+      <div class="field"><label for="fOutcome">${isSvc ? 'Service feedback' : 'Outcome'}</label><select id="fOutcome" onchange="setForm('outcome', this.value)">${opt(isSvc ? SERVICE_OUTCOMES : isLead ? LEAD_OUTCOMES : OUTCOMES, f.outcome, isSvc ? 'Choose feedback' : 'Choose outcome')}</select></div>
+      ${isSvc || isLead ? '' : `<div class="field"><label for="fReason">Main reason (if not driving or not paying)</label><select id="fReason" onchange="setForm('reason', this.value)">${opt(REASONS, f.reason, 'None / not applicable')}</select></div>`}
       ${f.outcome === 'Coming back' ? `<div class="field"><label for="fBack">Coming back on</label><input type="date" id="fBack" value="${esc(f.comeback)}" min="${S.today}" onchange="setForm('comeback', this.value)"></div>` : ''}
       ` : ''}
       <div class="field full"><label for="fComment">Remark (required)</label><textarea id="fComment" placeholder="${connected ? 'What did the driver say?' : 'e.g. rang twice, no answer'}" oninput="S.current.form.comment=this.value">${esc(f.comment)}</textarea></div>
@@ -1188,7 +1294,7 @@ async function saveCall() {
 
 // ---------- done ----------
 function resultBadge(r) {
-  const cls = { back: 'b-ok', continued: 'b-ok', stayed: 'b-ok', happy: 'b-ok', notyet: 'b-wait', pending: 'b-wait', dropped: 'b-bad', left: 'b-bad', unhappy: 'b-bad' }[r.state] || 'b-wait';
+  const cls = { onboarded: 'b-ok', back: 'b-ok', continued: 'b-ok', stayed: 'b-ok', happy: 'b-ok', notyet: 'b-wait', pending: 'b-wait', dropped: 'b-bad', left: 'b-bad', unhappy: 'b-bad' }[r.state] || 'b-wait';
   return `<span class="badge ${cls}">${esc(r.label)}</span>`;
 }
 
@@ -1205,18 +1311,19 @@ function renderDone() {
     const den = decided ? sub.filter(x => decided.includes(x.result.state)).length : sub.length;
     return { n: sub.length, good, den, pct: den ? Math.round(good / den * 100) : null };
   };
-  const r = part('rent', ['back']), j = part('join', ['continued'], ['continued', 'dropped']), e = part('exit', ['stayed'], ['stayed', 'left']), sv = part('svc', ['happy']);
+  const r = part('rent', ['back']), j = part('join', ['continued'], ['continued', 'dropped']), e = part('exit', ['stayed'], ['stayed', 'left']), sv = part('svc', ['happy']), ld = part('lead', ['onboarded']);
   const chip = p => p === null ? '' : ` <span class="pct-chip">${p}%</span>`;
   document.getElementById('doneSummary').innerHTML = `
-    <div class="total-card"><div class="label">Done calls</div><div class="value">${all.length}</div><div class="foot">rent ${r.n}, new joiner ${j.n}, exit ${e.n}, service ${sv.n}</div></div>
+    <div class="total-card"><div class="label">Done calls</div><div class="value">${all.length}</div><div class="foot">rent ${r.n}, new joiner ${j.n}, exit ${e.n}, service ${sv.n}, leads ${ld.n}</div></div>
     <div class="total-card"><div class="label">Rent: came back</div><div class="value">${r.good}${chip(r.pct)}</div><div class="foot">paid rent after the call, of ${r.den}</div></div>
     <div class="total-card"><div class="label">New joiners continued</div><div class="value">${j.good}${chip(j.pct)}</div><div class="foot">paid rent on or after day 30, of ${j.den} past day 30 or dropped</div></div>
     <div class="total-card"><div class="label">Exit notices: stayed</div><div class="value">${e.good}${chip(e.pct)}</div><div class="foot">paid rent after last working day, of ${e.den} decided</div></div>
+    <div class="total-card"><div class="label">Leads onboarded</div><div class="value">${ld.good}${chip(ld.pct)}</div><div class="foot">paid rent after the form, of ${ld.den} lead calls done</div></div>
     <div class="total-card"><div class="label">Service: happy</div><div class="value">${sv.good}${chip(sv.pct)}</div><div class="foot">of ${sv.den} service feedback calls done</div></div>`;
 
   const fb = (key, val, label, kind) => `<button class="filter-btn ${S[kind] === val ? 'active' : ''}" onclick="S.${kind}=${val === null ? 'null' : `'${val}'`}; renderDone();">${label}</button>`;
   document.getElementById('doneFilters').innerHTML =
-    fb('c', null, 'All', 'doneCat') + fb('c', 'rent', 'Rent', 'doneCat') + fb('c', 'join', 'New joiner', 'doneCat') + fb('c', 'exit', 'Exit', 'doneCat') + fb('c', 'svc', 'Service', 'doneCat') +
+    fb('c', null, 'All', 'doneCat') + fb('c', 'rent', 'Rent', 'doneCat') + fb('c', 'join', 'New joiner', 'doneCat') + fb('c', 'exit', 'Exit', 'doneCat') + fb('c', 'svc', 'Service', 'doneCat') + fb('c', 'lead', 'Leads', 'doneCat') +
     '<span style="width:10px;"></span>' + fb('p', null, 'Both callers', 'doneCaller') + CALLERS.map(c => fb('p', c, c, 'doneCaller')).join('');
 
   let rows = all;
@@ -1268,6 +1375,11 @@ function renderImpact() {
       <div class="card"><h3>Why drivers stop (connected calls)</h3>${bars(I.reasons)}</div>
       <div class="card"><h3>What drivers said</h3>${bars(I.outcomes)}</div>
     </div>
+    <div class="section"><div class="card"><h3>Instagram leads</h3>
+      <div class="note" style="margin-bottom:10px;">Onboarded = the form's phone number paid rent (passenger or cargo) on or after the form date</div>
+      <div class="tbl-wrap" style="margin-bottom:12px;"><table><thead><tr><th></th><th class="num">Leads</th><th class="num">Onboarded</th><th class="num">Rate</th></tr></thead><tbody>
+      ${[['Reached', I.leads.reached], ['Not reached', I.leads.notReached], ['Never called', I.leads.neverCalled]].map(([k, g]) => `<tr><td>${k}</td><td class="num">${g.total}</td><td class="num">${g.onboarded}</td><td class="num">${g.total ? '<b>' + Math.round(g.onboarded / g.total * 100) + '%</b>' : '-'}</td></tr>`).join('')}
+      </tbody></table></div>${bars(I.leads.outcomes)}</div></div>
     <div class="section"><div class="card"><h3>Service feedback</h3>
       <div class="note" style="margin-bottom:8px;">${I.svc.called} service calls made, ${I.svc.reached} reached</div>${bars(I.svc.outcomes)}</div></div>
     <div class="section"><div class="section-head"><h2>Callers</h2></div>
