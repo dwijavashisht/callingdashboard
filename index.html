@@ -49,7 +49,7 @@ button,select,input,textarea{font:inherit;}
 .section-head h2{font-size:19px; font-weight:600;}
 .note{font-size:12px; color:var(--ink-dim); font-family:'IBM Plex Mono',monospace;}
 
-.kpi-groups{display:grid; grid-template-columns:3fr 3fr 1fr 1fr 1fr; gap:14px;}
+.kpi-groups{display:grid; grid-template-columns:3fr 3fr 1fr 1fr 1fr 1fr; gap:14px;}
 .kpi-group .glabel{font-size:12px; color:var(--ink-dim); margin:0 0 6px 2px; font-weight:500;}
 .kpis{display:grid; gap:10px;}
 .kpis.k3{grid-template-columns:repeat(3,1fr);}
@@ -86,6 +86,23 @@ th.ctr,td.ctr{text-align:center;}
 .b-rent10{background:rgba(159,18,57,0.14); color:#9f1239;}
 .b-join{background:rgba(37,99,235,0.12); color:var(--blue);}
 .b-exit{background:rgba(124,58,237,0.12); color:var(--purple);}
+.b-camp{background:rgba(79,70,229,0.12); color:#4338ca;}
+.kpi.c-camp{color:#4338ca;}
+.b-rnr{background:rgba(139,147,161,0.18); color:#4b5563;}
+.howto{margin-top:8px; font-size:12px; color:var(--ink-dim);}
+.howto summary{cursor:pointer; color:var(--blue);}
+.howto ol{margin:6px 0 0 18px; padding:0; line-height:1.55;}
+.qa{display:grid; grid-template-columns:minmax(160px,1fr) 2fr; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:12px; overflow:hidden; margin-bottom:14px;}
+.qa div{background:var(--panel); padding:8px 12px; font-size:13px;}
+.qa .q{color:var(--ink-dim); font-size:12px;}
+.stat-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:12px; overflow:hidden; margin-bottom:14px;}
+.stat-grid > div{background:var(--panel); padding:10px 12px;}
+.stat-grid .k{font-size:11px; color:var(--ink-dim);}
+.stat-grid .v{font-family:'IBM Plex Mono',monospace; font-size:20px; font-weight:600; margin-top:2px;}
+.stat-grid .v.warn{color:var(--amber);} .stat-grid .v.ok{color:var(--teal);}
+.field input[type=text],.field input[type=url]{width:100%; border:1.5px solid #c7cac4; border-radius:8px; padding:8px 10px; background:var(--panel); font-size:13.5px;}
+.field .hint{font-size:11.5px; color:var(--ink-dim); margin-top:4px;}
+@media (max-width:700px){ .stat-grid{grid-template-columns:1fr 1fr;} .qa{grid-template-columns:1fr;} }
 .b-lead{background:rgba(219,39,119,0.12); color:#be185d;}
 .b-svc{background:rgba(15,118,110,0.12); color:#0f766e;}
 .b-ok{background:rgba(15,157,104,0.12); color:var(--teal);}
@@ -190,6 +207,8 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
 
 <div class="view-nav">
   <button class="view-nav-btn active" id="navQueue" onclick="setView('queue')">To call <span class="cnt" id="cntQueue">0</span></button>
+  <button class="view-nav-btn" id="navRnr" onclick="setView('rnr')">RNR <span class="cnt" id="cntRnr">0</span></button>
+  <button class="view-nav-btn" id="navCampaigns" onclick="setView('campaigns')">Campaigns <span class="cnt" id="cntCampaigns">0</span></button>
   <button class="view-nav-btn" id="navDone" onclick="setView('done')">Done <span class="cnt" id="cntDone">0</span></button>
   <button class="view-nav-btn" id="navImpact" onclick="setView('impact')">Impact</button>
 </div>
@@ -226,8 +245,37 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
   </div>
 </div>
 
+<div id="viewRnr" style="display:none;">
+  <div class="section">
+    <div class="section-head">
+      <h2>Not picking up</h2>
+      <div class="filters"><input class="search" id="rnrSearch" placeholder="Search name, ID or phone" oninput="renderRnr()"></div>
+    </div>
+    <div class="note" style="margin-bottom:10px;">Drivers and leads with 7 or more unanswered tries over 10 or more days move here from To call. They can still be called; connecting with a remark moves them to Done.</div>
+    <div class="tbl-wrap"><div class="tbl-scroll" id="rnrTable"></div></div>
+  </div>
+</div>
+
+<div id="viewCampaigns" style="display:none;">
+  <div class="section">
+    <div class="section-head">
+      <h2>Campaign leads</h2>
+      <div class="filters"><button class="primary" onclick="openAddCampaign()">Add campaign</button></div>
+    </div>
+    <div id="campaignsBody"></div>
+  </div>
+</div>
+
 <div id="viewImpact" style="display:none;">
   <div id="impactBody"></div>
+</div>
+
+<div class="modal-overlay" id="cmodal" onclick="if(event.target===this) closeCModal()">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="cTitle">
+    <div class="modal-head"><div><h3 id="cTitle"></h3><div class="modal-sub" id="cSub"></div></div>
+      <button class="modal-close" onclick="closeCModal()" aria-label="Close">✕</button></div>
+    <div class="modal-body" id="cBody"></div>
+  </div>
 </div>
 
 <div class="modal-overlay" id="modal" onclick="if(event.target===this) closeModal()">
@@ -267,7 +315,12 @@ const CALL_STATUSES = ['Connected', 'RNR', 'Switched off / not reachable', 'Busy
 const OUTCOMES = ['Coming back', 'Will pay rent today', 'On leave', 'Wants to exit / left', 'All good'];
 const REASONS = ['Vehicle issue', 'Charging issue', 'Low earnings', 'Health', 'Family / village',
   'Joined another fleet or platform', 'Issue with hub staff', 'Other'];
-const CALLERS = ['Jyoti', 'Swati'];
+const CALLERS = ['Jyoti', 'Nandani'];   // Swati left in Oct 2026; her past calls stay in history
+const RNR_DAYS = 10, RNR_MIN_TRIES = 7; // unanswered for 10+ days with 7+ tries -> RNR tab
+const CAMP_OUTCOMES = ['Interested, coming to hub', 'Interested, call back later', 'Interested in other segment',
+  'Not interested', 'Not eligible', 'Already driving with another fleet', 'Not in Delhi NCR'];
+const CAMP_SNOOZE_OUTCOME = 'Interested, call back later';      // stays open, returns on the call-back date
+const CAMP_DATE_OUTCOMES = ['Interested, coming to hub', 'Interested, call back later'];
 const LEAD_OUTCOMES = ['Interested in Passenger', 'Interested in Cargo', 'Not Interested'];
 const SERVICE_OUTCOMES = ['Happy with service', 'Took too long', 'New problem after service', 'Other'];
 // Passenger vehicles, copied from the passenger dashboard's MASTER_VEHICLE_LIST (138 vehicles).
@@ -445,6 +498,92 @@ function leadOnboarded(lead, phoneRent) {
   return d ? { date: d, driver: p.driver, payout: p.payout } : null;
 }
 
+// ---------- campaign leads (Meta lead sheets) ----------
+// A usable Indian mobile: 10 digits starting 6-9, after stripping a 91 or 0 prefix.
+function cleanMobile(raw) {
+  let d = String(raw === null || raw === undefined ? '' : raw).replace(/\D/g, '');
+  if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
+  else if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
+  return /^[6-9]\d{9}$/.test(d) ? d : null;
+}
+// "24th Oct" (no year: this year, or last year if that would be in the future), ISO, or month-first
+function leadDay(raw, today) {
+  const t = String(raw === null || raw === undefined ? '' : raw).trim();
+  if (!t) return null;
+  let m = t.match(/^(\d{1,2})(?:st|nd|rd|th)?[\s\-]+([A-Za-z]{3})[A-Za-z]*\.?(?:[\s\-,]+(\d{2,4}))?$/);
+  if (m && MONTHS[m[2].toLowerCase()]) {
+    const mo = MONTHS[m[2].toLowerCase()], d = +m[1];
+    let y = m[3] ? (+m[3] < 100 ? +m[3] + 2000 : +m[3]) : +today.slice(0, 4);
+    let s = utcToDateStr(Date.UTC(y, mo - 1, d));
+    if (!m[3] && s > addDays(today, 1)) s = utcToDateStr(Date.UTC(y - 1, mo - 1, d));
+    return s;
+  }
+  m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return utcToDateStr(Date.UTC(+m[3], +m[1] - 1, +m[2]));
+  return sheetDay(t);
+}
+function prettyQuestion(h) { return String(h || '').replace(/_/g, ' ').replace(/\s+/g, ' ').replace(/\s+\?/g, '?').trim(); }
+function prettyAnswer(a) { return String(a || '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim(); }
+
+// One tab of a lead sheet. Finds the header row by a phone column; every other column that isn't
+// name, date or platform is kept as a question/answer pair for the call sheet.
+function parseCampaignSheet(rows, today) {
+  rows = (rows || []).filter(r => (r || []).some(x => String(x || '').trim() !== ''));
+  const hi = rows.findIndex(r => r.some(x => /phone|mobile/i.test(x || '')));
+  const out = { dataRows: 0, leads: [], invalid: [], dupWithin: [], headerFound: hi >= 0 };
+  if (hi < 0) return out;
+  const H = rows[hi].map(x => String(x || '').trim());
+  const find = re => H.findIndex(x => re.test(x));
+  const pCol = find(/phone|mobile/i);
+  let nCol = find(/full[_\s]?name/i); if (nCol < 0) nCol = find(/name/i);
+  const dCol = find(/^date$|created[_\s]?time|^created|timestamp/i);
+  const plCol = find(/platform/i);
+  const skip = new Set([pCol, nCol, dCol, plCol]);
+  const ignore = /^(id|ad[_\s]?id|ad[_\s]?name|adset[_\s]?id|adset[_\s]?name|campaign[_\s]?id|campaign[_\s]?name|form[_\s]?id|form[_\s]?name|is[_\s]?organic|lead[_\s]?status)$/i;
+  const qCols = H.map((h, i) => i).filter(i => !skip.has(i) && H[i] && !ignore.test(H[i]));
+  const seen = {};
+  rows.slice(hi + 1).forEach((r, k) => {
+    const rawPhone = String(r[pCol] || '').trim(), name = String(nCol >= 0 ? r[nCol] || '' : '').trim();
+    if (!rawPhone && !name) return;
+    out.dataRows++;
+    const rowNum = hi + k + 2;
+    const phone = cleanMobile(rawPhone);
+    if (!phone) { out.invalid.push({ name, raw: rawPhone, rowNum }); return; }
+    if (seen[phone]) { out.dupWithin.push({ name, phone, rowNum, firstRow: seen[phone].rowNum }); return; }
+    const lead = { phone, name, rowNum, date: (dCol >= 0 ? leadDay(r[dCol], today) : null) || null,
+      platform: plCol >= 0 ? prettyAnswer(r[plCol]) : '',
+      answers: qCols.map(i => [prettyQuestion(H[i]), prettyAnswer(r[i])]).filter(qa => qa[1]) };
+    seen[phone] = lead; out.leads.push(lead);
+  });
+  return out;
+}
+function campaignNameFor(tabName, today, existing) {
+  const word = (String(tabName || '').trim().split(/\s+/)[0] || 'leads').toLowerCase().replace(/[^a-z0-9]/g, '') || 'leads';
+  const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+today.slice(5, 7) - 1];
+  const base = word + mon + today.slice(2, 4);
+  const taken = new Set((existing || []).map(x => String(x).toLowerCase()));
+  if (!taken.has(base.toLowerCase())) return base;
+  let n = 2; while (taken.has((base + '-' + n).toLowerCase())) n++;
+  return base + '-' + n;
+}
+// Every lead source in the order it arrived (Instagram form by its date, a campaign by the day it
+// was added). The first time a phone number appears is its primary lead; later ones are duplicates.
+function buildLeadIndex(ctx) {
+  const srcs = [];
+  (ctx.leads || []).forEach(l => srcs.push({ phone: l.phone, src: 'insta', at: l.date, seq: 0, lead: l }));
+  (ctx.campaigns || []).forEach((cp, ci) => (cp.parsed ? cp.parsed.leads : []).forEach(l =>
+    srcs.push({ phone: l.phone, src: cp.id, at: istDateOf(cp.created_at), seq: 1 + ci, lead: l, campaign: cp })));
+  srcs.sort((a, b) => a.at < b.at ? -1 : a.at > b.at ? 1 : a.seq - b.seq);
+  const primary = {};
+  srcs.forEach(s => { if (!primary[s.phone]) primary[s.phone] = s; });
+  return { primary };
+}
+function campLeadDate(cp, l) { return l.date || istDateOf(cp.created_at); }
+// Paid rent before the lead date: already a Kadam driver, not a new lead
+function existingDriver(phone, date, phoneRent) { const p = phoneRent ? phoneRent[phone] : null; return !!(p && p.dates.some(d => d < date)); }
+
 function numOrNull(v) { return (v === undefined || v === null || v === '' || isNaN(Number(v))) ? null : Number(v); }
 
 // ---------- building driver records ----------
@@ -615,12 +754,24 @@ function buildItems(ctx) {
     });
   });
   // Instagram leads: open until called (connected + remark) or the number pays rent
+  const LI = ctx.leadIndex || buildLeadIndex(ctx);
   (ctx.leads || []).forEach(l => {
     if (l.date < PORTAL_START || leadOnboarded(l, ctx.phoneRent)) return;
+    if (LI.primary[l.phone] && LI.primary[l.phone].src !== 'insta') return;
     items.push({ key: `lead|ph:${l.phone}|${l.date}`, cat: 'lead', tier: null, driverId: null, unmatchedName: l.name || l.phone,
       phone: l.phone, lead: l, anchor: l.date, openSince: l.date,
       detail: `Filled the Instagram form on ${fmtDay(l.date)}${l.city ? ', city: ' + l.city : ''}${l.submissions > 1 ? ` (${l.submissions} times)` : ''}` });
   });
+  // campaign leads: one call per new phone number; duplicates and existing drivers get none
+  (ctx.campaigns || []).forEach(cp => (cp.parsed ? cp.parsed.leads : []).forEach(l => {
+    const pr = LI.primary[l.phone];
+    if (!pr || pr.src !== cp.id) return;
+    const date = campLeadDate(cp, l);
+    if (existingDriver(l.phone, date, ctx.phoneRent) || leadOnboarded({ phone: l.phone, date }, ctx.phoneRent)) return;
+    items.push({ key: `camp|ph:${l.phone}|${cp.id}`, cat: 'camp', tier: null, driverId: null, unmatchedName: l.name || l.phone,
+      phone: l.phone, lead: l, campaign: cp, anchor: date, openSince: istDateOf(cp.created_at),
+      detail: `${cp.segment || 'Lead'} lead from ${cp.name}${l.platform ? ' (' + l.platform + ')' : ''}, came in ${fmtDay(date)}` });
+  }));
   return items;
 }
 
@@ -636,6 +787,7 @@ const CAT_RANK = { rent: 3, exit: 2, join: 1 };
 function itemScore(it) {
   if (it.cat === 'svc') return 150;
   if (it.cat === 'lead') return 200;
+  if (it.cat === 'camp') return 190;
   if (it.cat === 'rent') return 300 + it.tier * 10 + Math.min(it.gap, 30);
   if (it.cat === 'exit') return 250;
   return 100 + it.tier;
@@ -647,7 +799,7 @@ function buildQueue(ctx) {
   const open = items.filter(it => !(byItem[it.key] || []).some(l => l.done));
   const rows = {};
   open.forEach(it => {
-    const rk = it.cat === 'lead' ? `lead:${it.phone}` : it.cat === 'svc' ? `svc:${it.driverId || 'veh'}:${it.vehicle}:${it.anchor}:${it.tier}`
+    const rk = it.cat === 'lead' ? `lead:${it.phone}` : it.cat === 'camp' ? `camp:${it.phone}` : it.cat === 'svc' ? `svc:${it.driverId || 'veh'}:${it.vehicle}:${it.anchor}:${it.tier}`
       : (it.driverId || ('name:' + normName(it.unmatchedName)));
     const r = rows[rk] || (rows[rk] = { rowKey: rk, driverId: it.driverId, name: null, items: [], attempts: [] });
     r.items.push(it);
@@ -667,7 +819,61 @@ function buildQueue(ctx) {
     return r;
   });
   list.sort((a, b) => (a.triedToday - b.triedToday) || (b.score - a.score) || String(a.openSince || '').localeCompare(String(b.openSince || '')) || String(a.name).localeCompare(String(b.name)));
-  return { rows: list, items, byItem };
+  list.forEach(r => {
+    Object.assign(r, rnrInfo(r.items.map(i => itemPrefix(i.key)), ctx.logs, ctx.today));
+    const last = r.attempts[r.attempts.length - 1];
+    r.snoozedUntil = last && last.outcome === CAMP_SNOOZE_OUTCOME && last.comeback_date && last.comeback_date > ctx.today ? last.comeback_date : null;
+  });
+  return { rows: list.filter(r => !r.rnr && !r.snoozedUntil), rnr: list.filter(r => r.rnr && !r.snoozedUntil),
+    snoozed: list.filter(r => r.snoozedUntil), all: list, items, byItem };
+}
+
+// The same call across steps: cat|who|anchor (rent lapse, joiner, lead, exit, service)
+function itemPrefix(key) { return key.split('|').slice(0, 3).join('|'); }
+// Unanswered tries since the last connected call on these prefixes
+function rnrInfo(prefixes, logs, today) {
+  const P = new Set(prefixes);
+  const L = (logs || []).filter(l => (l.item_keys || []).some(k => P.has(itemPrefix(k))))
+    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  let lastConn = -1; L.forEach((l, i) => { if (l.call_status === 'Connected') lastConn = i; });
+  const un = L.slice(lastConn + 1);
+  const since = un.length ? istDateOf(un[0].created_at) : null;
+  return { unanswered: un.length, unansweredSince: since,
+    rnr: un.length >= RNR_MIN_TRIES && !!since && daysBetween(since, today) >= RNR_DAYS };
+}
+
+// Live progress of one campaign: list check plus where each callable lead stands
+function campaignStats(cp, ctx, q) {
+  const LI = ctx.leadIndex || buildLeadIndex(ctx);
+  const p = cp.parsed || { dataRows: 0, leads: [], invalid: [], dupWithin: [] };
+  const s = { rows: p.dataRows, valid: p.leads.length + p.dupWithin.length, invalid: p.invalid.length, dupWithin: p.dupWithin.length,
+    unique: p.leads.length, dupPrevious: 0, dupPreviousList: [], existing: 0, existingList: [], callable: 0,
+    fresh: 0, tried: 0, rnr: 0, callback: 0, connected: 0, interested: 0, converted: 0, outcomes: {} };
+  CAMP_OUTCOMES.forEach(o => { s.outcomes[o] = 0; });
+  const rowByKey = {}; if (q) (q.all || []).forEach(r => r.items.forEach(i => { rowByKey[i.key] = r; }));
+  const byItem = logsByItem(ctx.logs);
+  p.leads.forEach(l => {
+    const pr = LI.primary[l.phone];
+    if (pr && pr.src !== cp.id) { s.dupPrevious++; s.dupPreviousList.push({ name: l.name, phone: l.phone, firstIn: pr.src === 'insta' ? 'Instagram form' : (pr.campaign ? pr.campaign.name : 'another list') }); return; }
+    const date = campLeadDate(cp, l);
+    if (existingDriver(l.phone, date, ctx.phoneRent)) { s.existing++; s.existingList.push({ name: l.name, phone: l.phone, driver: ctx.phoneRent[l.phone].driver }); return; }
+    s.callable++;
+    const key = `camp|ph:${l.phone}|${cp.id}`;
+    const logs = byItem[key] || [];
+    const converted = !!leadOnboarded({ phone: l.phone, date }, ctx.phoneRent);
+    if (converted) s.converted++;
+    if (converted && !logs.length) { s.convertedUncalled = (s.convertedUncalled || 0) + 1; return; }
+    const conn = logs.filter(x => x.call_status === 'Connected');
+    if (conn.length) {
+      s.connected++;
+      const o = conn[conn.length - 1].outcome;
+      if (o) s.outcomes[o] = (s.outcomes[o] || 0) + 1;
+      if (/^Interested/.test(o || '')) s.interested++;
+      const r = rowByKey[key]; if (r && r.snoozedUntil) s.callback++;
+    } else if (!logs.length) s.fresh++;
+    else { const r = rowByKey[key]; if (r && r.rnr) s.rnr++; else s.tried++; }
+  });
+  return s;
 }
 
 // ---------- results: did the call help? ----------
@@ -686,6 +892,12 @@ function parseItemKey(k) {
 function itemResult(key, callIso, ctx, log) {
   const pk = parseItemKey(key);
   const id = /^(name|veh|ph):/.test(pk.who) ? null : pk.who;
+  if (pk.cat === 'camp') {
+    const cp = (ctx.campaigns || []).find(x => x.id === pk.anchor);
+    const l = cp && cp.parsed ? cp.parsed.leads.find(x => x.phone === pk.who.slice(3)) : null;
+    const on = leadOnboarded({ phone: pk.who.slice(3), date: cp && l ? campLeadDate(cp, l) : (cp ? istDateOf(cp.created_at) : '1900-01-01') }, ctx.phoneRent);
+    return on ? { state: 'onboarded', label: `Onboarded, paid rent ${fmtDay(on.date)}` } : { state: 'notyet', label: 'Not onboarded yet' };
+  }
   if (pk.cat === 'lead') {
     const on = leadOnboarded({ phone: pk.who.slice(3), date: pk.anchor }, ctx.phoneRent);
     return on ? { state: 'onboarded', label: `Onboarded, paid rent ${fmtDay(on.date)}` } : { state: 'notyet', label: 'Not onboarded yet' };
@@ -773,7 +985,7 @@ function impactSummary(ctx) {
     outcomes: leadOut,
   };
   const isSvc = l => (l.item_keys || []).length > 0 && l.item_keys.every(k => k.startsWith('svc|'));
-  const isLead = l => (l.item_keys || []).some(k => k.startsWith('lead|'));
+  const isLead = l => (l.item_keys || []).some(k => k.startsWith('lead|') || k.startsWith('camp|'));
   const connectedLogs = (ctx.logs || []).filter(l => l.call_status === 'Connected' && !isSvc(l) && !isLead(l));
   const svcOutcomes = {}; SERVICE_OUTCOMES.forEach(o => { svcOutcomes[o] = 0; });
   const svcLogs = (ctx.logs || []).filter(isSvc);
@@ -843,6 +1055,8 @@ function leavesFor(driverId, name, ctx) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
+  CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
+  buildLeadIndex, campaignStats, rnrInfo, itemPrefix, existingDriver,
   LEAD_OUTCOMES, parseLeadForm, buildPhoneRent, leadOnboarded, phone10,
   SERVICE_OUTCOMES, MASTER_VEHICLES, parseServiceTracker, sheetDay, normReg, driversOnVehicle,
   PORTAL_START, rentEpisodes, joinerCohort,
@@ -858,6 +1072,9 @@ if (typeof module !== 'undefined') module.exports = {
 const SUPABASE_URL = 'https://lplxkdjqivknvhmtmdux.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_e6t8GrHCcaMyBJMoBZydSg_Ot8fi551';
 const CALLS_TABLE = 'calling_portal_calls';
+// Campaigns are stored as marker rows in the calls table, so no extra Supabase table is needed.
+// These rows are kept out of every call count.
+const CAMPAIGN_MARK = 'Campaign added', CAMPAIGN_CALLER = 'Portal';
 const LEAVE_KEY = '1900-01-06', EXIT_KEY = '1900-01-07';
 const SESSION_DAYS = 16;
 const MAINTENANCE_SHEET_ID = '1w0wODcvdp1_iMmcKZDFLxsb55mh27SotsXZfUK0ZtU0';
@@ -868,7 +1085,7 @@ try { sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE
 
 const S = {
   drivers: {}, sessions: {}, leaves: [], exits: [], logs: [], today: null, ref: null,
-  leaveUploadedAt: null, tableMissing: false, loadError: null, services: [], svcError: null, svcSource: null, leads: [], leadError: null, phoneRent: {},
+  leaveUploadedAt: null, tableMissing: false, loadError: null, services: [], svcError: null, svcSource: null, leads: [], leadError: null, phoneRent: {}, campaigns: [], campTableMissing: false, Q: null, lastOrder: [], cm: null,
   view: 'queue', catFilter: null, hub: null, doneCat: null, doneCaller: null, current: null,
 };
 
@@ -885,7 +1102,7 @@ function money(v) { return v === null || v === undefined ? '-' : '₹' + Number(
 function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
-function ctx() { return { drivers: S.drivers, sessions: S.sessions, leaves: S.leaves, exits: S.exits, logs: S.logs, today: S.today, ref: S.ref, services: S.services, leads: S.leads, phoneRent: S.phoneRent }; }
+function ctx() { return { drivers: S.drivers, sessions: S.sessions, leaves: S.leaves, exits: S.exits, logs: S.logs, today: S.today, ref: S.ref, services: S.services, leads: S.leads, phoneRent: S.phoneRent, campaigns: S.campaigns.filter(c => c.parsed), leadIndex: S.leadIndex }; }
 function hubOk(hubKey) { return !S.hub || hubKey === S.hub; }
 
 // ---------- loading ----------
@@ -963,6 +1180,30 @@ function parseCSVText(text) {
   return rows.filter(r => r.some(c => (c || '').trim() !== ''));
 }
 
+// Campaign lead sheets: the list of campaigns lives in Supabase; each sheet is read live
+function sheetRef(url) {
+  const id = (String(url).match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/) || [])[1] || null;
+  const gid = (String(url).match(/[#&?]gid=(\d+)/) || [])[1] || '0';
+  return id ? { id, gid } : null;
+}
+async function fetchSheetRows(sheetId, gid) {
+  const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const text = await res.text();
+  if (/^\s*<(!doctype|html)/i.test(text)) throw new Error('the sheet is not shared');
+  return parseCSVText(text);
+}
+async function loadCampaigns() {
+  const list = (S.campaignRows || []).map(r => {
+    let meta = {}; try { meta = JSON.parse(r.comment || '{}'); } catch (e) {}
+    return { id: r.id, created_at: r.created_at, name: r.driver_name, sheet_url: meta.sheet_url, sheet_id: meta.sheet_id, gid: meta.gid || '0', tab_name: meta.tab_name, segment: meta.segment };
+  }).filter(c => c.name && c.sheet_id).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  S.campaigns = await Promise.all(list.map(async cp => {
+    try { return { ...cp, parsed: parseCampaignSheet(await fetchSheetRows(cp.sheet_id, cp.gid), S.today), error: null }; }
+    catch (e) { return { ...cp, parsed: null, error: 'Could not read this sheet (' + (e.message || e) + '). Check it is shared as Anyone with the link: Viewer.' }; }
+  }));
+}
+
 async function loadLogs() {
   const { data, error } = await sb.from(CALLS_TABLE).select('*').order('created_at', { ascending: true }).limit(10000);
   if (error) {
@@ -970,7 +1211,9 @@ async function loadLogs() {
     throw error;
   }
   S.tableMissing = false;
-  S.logs = data || [];
+  const rows = data || [];
+  S.logs = rows.filter(l => l.call_status !== CAMPAIGN_MARK);
+  S.campaignRows = rows.filter(l => l.call_status === CAMPAIGN_MARK);
 }
 
 async function refreshAll(manual) {
@@ -981,6 +1224,7 @@ async function refreshAll(manual) {
     await loadServices();
     await loadLeads();
     await loadLogs();
+    await loadCampaigns();
     S.loadError = null;
   } catch (e) {
     console.error(e);
@@ -991,6 +1235,8 @@ async function refreshAll(manual) {
 
 // ---------- rendering ----------
 function renderAll() {
+  S.leadIndex = buildLeadIndex({ leads: S.leads, campaigns: S.campaigns.filter(c => c.parsed) });
+  S.Q = buildQueue(ctx());
   const sub = document.getElementById('subLabel');
   if (S.ref) {
     const leave = S.leaveUploadedAt ? ` · leave and exit file uploaded ${shortDate(istDateOf(S.leaveUploadedAt))}` : '';
@@ -999,14 +1245,19 @@ function renderAll() {
   renderHubFilters();
   renderBanners();
   renderQueue();
+  renderRnr();
+  renderCampaigns();
   renderDone();
   renderImpact();
   if (S.current) renderModal();
+  if (S.cm && S.cm.mode === 'summary') renderCampaignSummary();
 }
 
 function renderBanners() {
   const b = [];
   if (S.loadError) b.push(`<div class="banner err">${esc(S.loadError)}</div>`);
+  if (S.campError) b.push(`<div class="banner warn">${esc(S.campError)}</div>`);
+  S.campaigns.filter(c => c.error).forEach(c => b.push(`<div class="banner warn">Campaign ${esc(c.name)}: ${esc(c.error)}</div>`));
   if (S.leadError) b.push(`<div class="banner warn">${esc(S.leadError)}</div>`);
   if (S.svcError) b.push(`<div class="banner warn">${esc(S.svcError)}</div>`);
   if (S.tableMissing) b.push(`<div class="banner err">Calls can't be saved yet: the <code>${CALLS_TABLE}</code> table doesn't exist. Run <code>calling_portal_calls.sql</code> once in Supabase (SQL Editor, paste, Run), then reload.</div>`);
@@ -1022,7 +1273,7 @@ function setHub(k) { S.hub = k; renderAll(); }
 
 function setView(v) {
   S.view = v;
-  ['queue', 'done', 'impact'].forEach(x => {
+  ['queue', 'rnr', 'campaigns', 'done', 'impact'].forEach(x => {
     document.getElementById('view' + x[0].toUpperCase() + x.slice(1)).style.display = x === v ? '' : 'none';
     document.getElementById('nav' + x[0].toUpperCase() + x.slice(1)).classList.toggle('active', x === v);
   });
@@ -1033,21 +1284,57 @@ function itemBadge(it) {
   if (it.cat === 'join') return `<span class="badge b-join">New joiner day ${it.tier}</span>`;
   if (it.cat === 'exit') return `<span class="badge b-exit">Exit notice</span>`;
   if (it.cat === 'lead') return `<span class="badge b-lead">New lead - Instagram</span>`;
+  if (it.cat === 'camp') return `<span class="badge b-camp">Lead: ${esc(it.campaign ? it.campaign.name : campaignNameById(it.anchor))}</span>`;
   if (it.cat === 'svc') return `<span class="badge b-svc">Service feedback${it.tier ? ' #' + it.tier : ''}</span>`;
   return '';
 }
-function keyBadge(cat, tier) { return itemBadge({ cat, tier }); }
+function campaignNameById(id) { const c = S.campaigns.find(x => x.id === id); return c ? c.name : 'campaign'; }
+function keyBadge(cat, tier, anchor) { return itemBadge({ cat, tier, anchor }); }
 function itemLabel(it) {
   if (it.cat === 'rent') return `Rent not paid ${it.tier}+ days`;
   if (it.cat === 'join') return `New joiner day ${it.tier}`;
   if (it.cat === 'lead') return 'New lead - Instagram';
+  if (it.cat === 'camp') return it.campaign ? `Campaign lead (${it.campaign.name})` : 'Campaign lead';
   if (it.cat === 'svc') return it.vehicle ? `Service ${it.tier} feedback (${it.vehicle})` : 'Service feedback';
   return 'Exit notice';
 }
 
-function queueRows() {
-  const q = buildQueue(ctx());
-  return q.rows.filter(r => hubOk(r.hub));
+function queueRows() { return (S.Q || buildQueue(ctx())).rows.filter(r => hubOk(r.hub)); }
+function rnrRows() { return (S.Q || buildQueue(ctx())).rnr.filter(r => hubOk(r.hub)); }
+function rowSub(r) {
+  const it = r.items[0];
+  if (r.driverId) return esc(r.driverId) + (it.cat === 'svc' ? ' · ' + esc(it.vehicle) : '');
+  if (it.cat === 'lead') return esc('Instagram form' + (it.lead.city ? ', ' + it.lead.city : ''));
+  if (it.cat === 'camp') return esc(it.campaign.name + (it.campaign.segment ? ', ' + it.campaign.segment : ''));
+  if (it.cat === 'svc') return esc(it.matchHow === 'nodata' ? 'check-in data not uploaded yet for ' + it.vehicle : 'no check-in on ' + it.vehicle + ' that day');
+  return 'not matched to ledger';
+}
+function rowsTableHtml(rows, mode) {
+  return `<table><thead><tr><th>Driver</th><th class="hide-sm">Hub</th><th>Phone</th><th>Why call</th><th class="hide-sm">Last rent</th><th class="hide-sm">${mode === 'rnr' ? 'Unanswered since' : 'Waiting since'}</th><th class="ctr">${mode === 'rnr' ? 'Unanswered' : 'Tries'}</th><th class="hide-sm">Last try</th><th></th></tr></thead><tbody>` +
+    rows.map(r => {
+      const d = r.driverId ? S.drivers[r.driverId] : null;
+      const last = r.lastAttempt;
+      const since = mode === 'rnr' ? r.unansweredSince : r.openSince;
+      return `<tr class="queue-row ${mode !== 'rnr' && r.triedToday ? 'tried' : ''}">
+        <td><div class="driver-name">${esc(r.driverId ? r.name : (r.items[0].cat === 'svc' ? 'No driver found' : r.name))}</div><div class="driver-sub">${rowSub(r)}</div></td>
+        <td class="hide-sm">${esc(r.hub ? hubShort(r.hub) : '-')}</td>
+        <td class="mono" style="font-size:12px;">${esc(r.phone || '-')}</td>
+        <td>${r.items.map(itemBadge).join('')}</td>
+        <td class="hide-sm mono" style="font-size:12px;">${d && d.lastTopup ? shortDate(d.lastTopup) : '-'}</td>
+        <td class="hide-sm mono" style="font-size:12px;">${since ? shortDate(since) + (daysBetween(since, S.today) > 0 ? `<div class="driver-sub">${daysBetween(since, S.today)}d</div>` : '') : '-'}</td>
+        <td class="ctr mono">${mode === 'rnr' ? r.unanswered : r.attempts.length}</td>
+        <td class="hide-sm" style="font-size:12px;">${last ? `${esc(last.call_status)}<div class="driver-sub">${esc(last.caller)}, ${callTime(last.created_at)}</div>` : '<span class="driver-sub">not called</span>'}</td>
+        <td><button class="call-now" onclick="openRow('${esc(r.rowKey)}', '${mode}')">Call now</button></td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+}
+function renderRnr() {
+  let rows = rnrRows();
+  document.getElementById('cntRnr').textContent = rows.length;
+  const qv = (document.getElementById('rnrSearch').value || '').trim().toLowerCase();
+  if (qv) rows = rows.filter(r => [r.name, r.driverId, r.phone].some(x => String(x || '').toLowerCase().includes(qv)));
+  S.rnrOrder = rows.map(r => r.rowKey);
+  document.getElementById('rnrTable').innerHTML = rows.length ? rowsTableHtml(rows, 'rnr') : '<div class="empty">Nobody is in RNR right now.</div>';
 }
 
 function renderQueue() {
@@ -1087,6 +1374,9 @@ function renderQueue() {
     <div class="kpi-group"><div class="glabel">Leads</div><div class="kpis k1">
       ${card('lead', null, 'New lead - Instagram', 'until called or onboarded', 'c-lead')}
     </div></div>
+    <div class="kpi-group"><div class="glabel">Campaigns</div><div class="kpis k1">
+      ${card('camp', null, 'Campaign leads', 'from the Campaigns tab', 'c-camp')}
+    </div></div>
     <div class="kpi-group"><div class="glabel">Service</div><div class="kpis k1">
       ${card('svc', null, 'Service feedback', 'services done from 20 Sep', 'c-svc')}
     </div></div>`;
@@ -1100,11 +1390,11 @@ function setCat(cat, tier) {
 
 function renderQueueTable() {
   let rows = queueRows();
-  if (S.catFilter) rows = rows.filter(r => r.items.some(i => i.cat === S.catFilter.cat && (S.catFilter.tier === null || i.tier === S.catFilter.tier)));
+  if (S.catFilter) rows = rows.filter(r => r.items.some(i => i.cat === S.catFilter.cat && (S.catFilter.tier === null || i.tier === S.catFilter.tier) && (!S.catFilter.campaign || (i.campaign && i.campaign.id === S.catFilter.campaign))));
   const qv = (document.getElementById('queueSearch').value || '').trim().toLowerCase();
   if (qv) rows = rows.filter(r => [r.name, r.driverId, r.phone].some(x => String(x || '').toLowerCase().includes(qv)));
   document.getElementById('queueTitle').innerHTML = S.catFilter
-    ? `Call list: ${esc(itemLabel(S.catFilter))} <button class="filter-btn" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="S.catFilter=null; renderQueue();">Show all</button>`
+    ? `Call list: ${esc(S.catFilter.campaign ? campaignNameById(S.catFilter.campaign) : itemLabel(S.catFilter))} <button class="filter-btn" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="S.catFilter=null; renderQueue();">Show all</button>`
     : 'Call list';
   S.queueOrder = rows.map(r => r.rowKey);
   const el = document.getElementById('queueTable');
@@ -1112,27 +1402,14 @@ function renderQueueTable() {
     el.innerHTML = `<div class="empty">${S.ref ? 'Nobody to call here right now.' : 'Waiting for data.'}</div>`;
     return;
   }
-  el.innerHTML = `<table><thead><tr><th>Driver</th><th class="hide-sm">Hub</th><th>Phone</th><th>Why call</th><th class="hide-sm">Last rent</th><th class="hide-sm">Waiting since</th><th class="ctr">Tries</th><th class="hide-sm">Last try</th><th></th></tr></thead><tbody>` +
-    rows.map(r => {
-      const d = r.driverId ? S.drivers[r.driverId] : null;
-      const last = r.lastAttempt;
-      return `<tr class="queue-row ${r.triedToday ? 'tried' : ''}">
-        <td><div class="driver-name">${esc(r.driverId ? r.name : (r.items[0].cat === 'svc' ? 'No driver found' : r.name))}</div><div class="driver-sub">${esc(r.driverId || (r.items[0].cat === 'lead' ? 'Instagram form' + (r.items[0].lead.city ? ', ' + r.items[0].lead.city : '') : r.items[0].cat === 'svc' ? (r.items[0].matchHow === 'nodata' ? 'check-in data not uploaded yet for ' + r.items[0].vehicle : 'no check-in on ' + r.items[0].vehicle + ' that day') : 'not matched to ledger'))}${r.items[0].cat === 'svc' && r.driverId ? ' · ' + esc(r.items[0].vehicle) : ''}</div></td>
-        <td class="hide-sm">${esc(r.hub ? hubShort(r.hub) : '-')}</td>
-        <td class="mono" style="font-size:12px;">${esc(r.phone || '-')}</td>
-        <td>${r.items.map(itemBadge).join('')}</td>
-        <td class="hide-sm mono" style="font-size:12px;">${d && d.lastTopup ? shortDate(d.lastTopup) : '-'}</td>
-        <td class="hide-sm mono" style="font-size:12px;">${r.openSince ? shortDate(r.openSince) + (daysBetween(r.openSince, S.today) > 0 ? `<div class="driver-sub">${daysBetween(r.openSince, S.today)}d</div>` : '') : '-'}</td>
-        <td class="ctr mono">${r.attempts.length}</td>
-        <td class="hide-sm" style="font-size:12px;">${last ? `${esc(last.call_status)}<div class="driver-sub">${esc(last.caller)}, ${callTime(last.created_at)}</div>` : '<span class="driver-sub">not called</span>'}</td>
-        <td><button class="call-now" onclick="openRow('${esc(r.rowKey)}')">Call now</button></td>
-      </tr>`;
-    }).join('') + '</tbody></table>';
+  el.innerHTML = rowsTableHtml(rows, 'queue');
 }
 
 // ---------- call sheet ----------
-function openRow(rowKey) {
-  S.current = { rowKey, form: { caller: lsGet('portalCaller') || '', status: '', outcome: '', reason: '', comeback: '', comment: '', }, msg: '' };
+function openRow(rowKey, list) {
+  S.lastOrder = list === 'rnr' ? (S.rnrOrder || []) : (S.queueOrder || []); S.lastList = list || 'queue';
+  const savedCaller = lsGet('portalCaller');
+  S.current = { rowKey, form: { caller: CALLERS.includes(savedCaller) ? savedCaller : '', status: '', outcome: '', reason: '', comeback: '', comment: '', }, msg: '' };
   renderModal();
   document.getElementById('modal').classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -1155,7 +1432,7 @@ const ASK = {
 function renderModal() {
   const cur = S.current; if (!cur) return;
   const q = buildQueue(ctx());
-  let row = q.rows.find(r => r.rowKey === cur.rowKey);
+  let row = (q.all || q.rows).find(r => r.rowKey === cur.rowKey);
   if (!row && cur.lastRow) row = cur.lastRow;
   if (!row) { closeModal(); return; }
   cur.lastRow = row;
@@ -1163,11 +1440,26 @@ function renderModal() {
   const ses = row.driverId ? S.sessions[row.driverId] : null;
   const isSvc = row.items[0].cat === 'svc';
   const isLead = row.items[0].cat === 'lead';
+  const isCamp = row.items[0].cat === 'camp';
   document.getElementById('mName').textContent = row.driverId ? row.name : (isSvc ? 'No driver found for ' + row.items[0].vehicle : (row.name || 'Unknown driver'));
-  document.getElementById('mSub').textContent = [row.driverId || (isLead ? 'Instagram lead' : 'Not matched to the ledger'), row.hub ? hubShort(row.hub) : null, row.phone].filter(Boolean).join(' · ');
-  document.getElementById('mCall').innerHTML = row.phone ? `<a class="call-btn" href="tel:${esc(String(row.phone).replace(/[^\d+]/g, ''))}">Call ${esc(row.phone)}</a>` : '';
+  document.getElementById('mSub').textContent = [row.driverId || (isLead ? 'Instagram lead' : isCamp ? 'Campaign lead' : 'Not matched to the ledger'), row.hub ? hubShort(row.hub) : null, row.phone].filter(Boolean).join(' · ');
+  document.getElementById('mCall').innerHTML = row.phone ? `<a class="call-btn" href="tel:${esc(String(row.phone).replace(/[^\d+]/g, ''))}">Call ${esc(row.phone)}</a>
+    <details class="howto"><summary>Calling from a laptop?</summary><ol>
+      <li><b>Windows:</b> install Phone Link (free, from the Microsoft Store) and pair your phone once. Then the Call button rings through your phone.</li>
+      <li><b>Mac with an iPhone:</b> on the iPhone, Settings, Phone, Calls on Other Devices, turn on the Mac. Same Apple ID and Wi-Fi on both.</li>
+      <li>The first time you click Call, the browser asks which app to use. Pick Phone Link (Windows) or FaceTime (Mac) and tick "always".</li>
+      <li>On your phone itself, just open the portal and tap Call.</li></ol></details>` : '';
 
   let svcHtml = '';
+  if (isCamp) {
+    const it = row.items[0], l = it.lead, cp = it.campaign;
+    const inLedger = S.phoneRent[l.phone];
+    svcHtml = `<div class="facts">
+      ${[['Campaign', cp.name], ['Segment', cp.segment || '-'], ['Lead came in', l.date ? shortDate(l.date) : 'date not in sheet'], ['Platform', l.platform || '-'], ['Phone', l.phone], ['Sheet row', String(l.rowNum)]]
+        .map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('')}</div>
+      ${l.answers.length ? `<div class="sub-h">What they answered</div><div class="qa">${l.answers.map(([q2, a]) => `<div class="q">${esc(q2)}</div><div>${esc(a)}</div>`).join('')}</div>` : ''}
+      ${inLedger ? `<div class="banner warn">This number is in the ledger as ${esc(inLedger.driver)}. It counts as converted once they pay rent after the lead date.</div>` : ''}`;
+  }
   if (isLead) {
     const l = row.items[0].lead;
     const inLedger = S.phoneRent[l.phone];
@@ -1223,8 +1515,8 @@ function renderModal() {
 
   const rowKeys = new Set(row.items.map(i => i.key));
   const allLogs = S.logs.filter(l => (row.driverId && l.driver_id === row.driverId) || (l.item_keys || []).some(k => rowKeys.has(k)) || (!row.driverId && !isSvc && (l.driver_name || '').toLowerCase() === String(row.name).toLowerCase()));
-  const logLabelBadges = l => (l.item_keys || []).map(k => { const p = k.split('|'); return keyBadge(p[0], p[3] ? Number(p[3]) : null); }).join('');
-  const histHtml = `<div class="sub-h" style="margin-top:0;">Previous calls with this driver${allLogs.length ? ` (${allLogs.length})` : ''}</div>` + (allLogs.length
+  const logLabelBadges = l => (l.item_keys || []).map(k => { const p = k.split('|'); return keyBadge(p[0], p[3] ? Number(p[3]) : null, p[2]); }).join('');
+  const histHtml = `<div class="sub-h" style="margin-top:0;">Previous calls with this ${row.driverId ? 'driver' : 'number'}${allLogs.length ? ` (${allLogs.length})` : ''}</div>` + (allLogs.length
     ? `<div class="tbl-wrap" style="margin-bottom:14px;"><div class="tbl-scroll"><table class="hist"><thead><tr><th>When</th><th>Call about</th><th>By</th><th>Status</th><th>Outcome / reason</th><th>Remark</th></tr></thead><tbody>${allLogs.slice().reverse().map(l => `<tr><td style="white-space:nowrap;">${callTime(l.created_at)}${l.done ? ' <span class="badge b-ok">done</span>' : ''}</td><td>${logLabelBadges(l)}</td><td>${esc(l.caller)}</td><td>${esc(l.call_status)}</td><td>${esc([l.outcome, l.comeback_date ? 'on ' + shortDate(l.comeback_date) : null, l.reason].filter(Boolean).join(', ') || '-')}</td><td style="min-width:200px;">${esc(l.comment || '')}</td></tr>`).join('')}</tbody></table></div></div>`
     : `<div class="driver-sub" style="font-size:12.5px; margin-bottom:14px;">No calls logged with this driver yet.</div>`);
 
@@ -1237,13 +1529,13 @@ function renderModal() {
       <div class="field"><label>Called by</label><div class="seg">${CALLERS.map(c => `<button type="button" class="${f.caller === c ? 'on' : ''}" onclick="setForm('caller','${c}')">${c}</button>`).join('')}</div></div>
       <div class="field"><label for="fStatus">Call status</label><select id="fStatus" onchange="setForm('status', this.value)">${opt(CALL_STATUSES, f.status, 'Choose status')}</select></div>
       ${connected ? `
-      <div class="field"><label for="fOutcome">${isSvc ? 'Service feedback' : 'Outcome'}</label><select id="fOutcome" onchange="setForm('outcome', this.value)">${opt(isSvc ? SERVICE_OUTCOMES : isLead ? LEAD_OUTCOMES : OUTCOMES, f.outcome, isSvc ? 'Choose feedback' : 'Choose outcome')}</select></div>
-      ${isSvc || isLead ? '' : `<div class="field"><label for="fReason">Main reason (if not driving or not paying)</label><select id="fReason" onchange="setForm('reason', this.value)">${opt(REASONS, f.reason, 'None / not applicable')}</select></div>`}
-      ${f.outcome === 'Coming back' ? `<div class="field"><label for="fBack">Coming back on</label><input type="date" id="fBack" value="${esc(f.comeback)}" min="${S.today}" onchange="setForm('comeback', this.value)"></div>` : ''}
+      <div class="field"><label for="fOutcome">${isSvc ? 'Service feedback' : 'Outcome'}</label><select id="fOutcome" onchange="setForm('outcome', this.value)">${opt(isSvc ? SERVICE_OUTCOMES : isCamp ? CAMP_OUTCOMES : isLead ? LEAD_OUTCOMES : OUTCOMES, f.outcome, isSvc ? 'Choose feedback' : 'Choose outcome')}</select></div>
+      ${isSvc || isLead || isCamp ? '' : `<div class="field"><label for="fReason">Main reason (if not driving or not paying)</label><select id="fReason" onchange="setForm('reason', this.value)">${opt(REASONS, f.reason, 'None / not applicable')}</select></div>`}
+      ${f.outcome === 'Coming back' || (isCamp && CAMP_DATE_OUTCOMES.includes(f.outcome)) ? `<div class="field"><label for="fBack">${f.outcome === CAMP_SNOOZE_OUTCOME ? 'Call back on' : f.outcome === 'Coming back' ? 'Coming back on' : 'Coming to hub on'}</label><input type="date" id="fBack" value="${esc(f.comeback)}" min="${S.today}" onchange="setForm('comeback', this.value)"></div>` : ''}
       ` : ''}
       <div class="field full"><label for="fComment">Remark (required)</label><textarea id="fComment" placeholder="${connected ? 'What did the driver say?' : 'e.g. rang twice, no answer'}" oninput="S.current.form.comment=this.value">${esc(f.comment)}</textarea></div>
     </div>
-    <div class="driver-sub" style="font-size:12px; margin-top:4px;">${connected ? 'Connected with a remark moves this driver to Done.' : 'Not connected: the driver stays in the list to try again.'}</div>
+    <div class="driver-sub" style="font-size:12px; margin-top:4px;">${connected ? (isCamp && f.outcome === CAMP_SNOOZE_OUTCOME ? 'Call back later keeps this lead and brings it back to the list on the call-back date.' : 'Connected with a remark moves this to Done.') : `Not connected: stays in the list. After ${RNR_MIN_TRIES} unanswered tries over ${RNR_DAYS} days it moves to the RNR tab.`}</div>
     <div class="form-actions">
       <button class="primary" id="saveBtn" onclick="saveCall()" ${S.tableMissing ? 'disabled' : ''}>Save call</button>
       <span class="status-msg ${cur.msgCls || ''}" id="saveMsg">${esc(cur.msg || '')}</span>
@@ -1260,7 +1552,7 @@ function setForm(k, v) {
   f[k] = v;
   if (k === 'caller') lsSet('portalCaller', v);
   if (k === 'status' && v !== 'Connected') { f.outcome = ''; f.reason = ''; f.comeback = ''; }
-  if (k === 'outcome' && v !== 'Coming back') f.comeback = '';
+  if (k === 'outcome' && v !== 'Coming back' && !CAMP_DATE_OUTCOMES.includes(v)) f.comeback = '';
   S.current.msg = '';
   renderModal();
 }
@@ -1273,24 +1565,144 @@ async function saveCall() {
   if (!f.status) return fail('Choose the call status.');
   if (f.status === 'Connected' && !f.outcome) return fail(row.items[0].cat === 'svc' ? 'Choose the service feedback.' : 'Choose the outcome.');
   if (!(f.comment || '').trim()) return fail('Write a remark before saving.');
+  const camp = row.items[0].cat === 'camp';
+  if (camp && f.outcome === CAMP_SNOOZE_OUTCOME && !f.comeback) return fail('Pick the call-back date.');
   const btn = document.getElementById('saveBtn'); btn.disabled = true; btn.textContent = 'Saving…';
   const rec = {
     driver_id: row.driverId, driver_name: row.driverId ? row.name : (row.items[0].cat === 'svc' ? row.items[0].vehicle : row.name), hub: row.hub, phone: row.phone,
     item_keys: row.items.map(i => i.key), item_labels: row.items.map(itemLabel),
     caller: f.caller, call_status: f.status, outcome: f.outcome || null, reason: f.reason || null,
-    comeback_date: f.comeback || null, comment: (f.comment || '').trim(), done: f.status === 'Connected',
+    comeback_date: f.comeback || null, comment: (f.comment || '').trim(), done: f.status === 'Connected' && !(camp && f.outcome === CAMP_SNOOZE_OUTCOME),
   };
   const { error } = await sb.from(CALLS_TABLE).insert(rec);
   if (error) { btn.disabled = false; btn.textContent = 'Save call'; return fail('Not saved: ' + error.message); }
   await loadLogs();
   // move on to the next driver in the list the caller was working through
-  const order = S.queueOrder || [];
+  const order = S.lastOrder || [];
   const idx = order.indexOf(cur.rowKey);
+  const list = S.lastList;
   renderAll();
-  const next = order.slice(idx + 1).find(k => (S.queueOrder || []).includes(k));
-  if (next) { openRow(next); S.current.msg = `Saved ${row.name}. Next driver:`; S.current.msgCls = 'ok'; renderModal(); }
+  const nowOrder = list === 'rnr' ? (S.rnrOrder || []) : (S.queueOrder || []);
+  const next = order.slice(idx + 1).find(k => nowOrder.includes(k));
+  if (next) { openRow(next, list); S.current.msg = `Saved ${row.name}. Next driver:`; S.current.msgCls = 'ok'; renderModal(); }
   else closeModal();
 }
+
+// ---------- campaigns ----------
+function campStatsFor(cp) { return campaignStats(cp, ctx(), S.Q); }
+function renderCampaigns() {
+  const el = document.getElementById('campaignsBody');
+  document.getElementById('cntCampaigns').textContent = S.campaigns.length;
+  if (S.tableMissing) { el.innerHTML = '<div class="banner err">Campaigns are saved in the calls table, which could not be found.</div>'; return; }
+  if (!S.campaigns.length) { el.innerHTML = '<div class="tbl-wrap"><div class="empty">No campaigns yet. Click Add campaign and paste the link to a lead sheet tab.</div></div>'; return; }
+  el.innerHTML = `<div class="tbl-wrap"><div class="tbl-scroll"><table><thead><tr><th>Campaign</th><th class="hide-sm">Added</th><th class="num">Leads</th><th class="num">Fresh</th><th class="num hide-sm">Tried</th><th class="num hide-sm">RNR</th><th class="num">Connected</th><th class="num">Interested</th><th class="num">Converted</th><th></th></tr></thead><tbody>` +
+    S.campaigns.slice().reverse().map(cp => {
+      if (!cp.parsed) return `<tr><td><div class="driver-name">${esc(cp.name)}</div><div class="driver-sub">${esc(cp.segment || '')}</div></td><td colspan="8" style="color:var(--rose); font-size:12.5px;">${esc(cp.error)}</td><td><button class="filter-btn" onclick="openCampaignSummary('${cp.id}')">Summary</button></td></tr>`;
+      const st = campStatsFor(cp);
+      return `<tr><td><div class="driver-name">${esc(cp.name)}</div><div class="driver-sub">${esc(cp.segment || '')}${cp.tab_name ? ', tab ' + esc(cp.tab_name) : ''}</div></td>
+        <td class="hide-sm mono" style="font-size:12px;">${shortDate(istDateOf(cp.created_at))}</td>
+        <td class="num">${st.callable}</td><td class="num">${st.fresh}</td><td class="num hide-sm">${st.tried}</td><td class="num hide-sm">${st.rnr}</td>
+        <td class="num">${st.connected}</td><td class="num">${st.interested}</td><td class="num"><b>${st.converted}</b></td>
+        <td style="white-space:nowrap;"><button class="filter-btn" onclick="openCampaignSummary('${cp.id}')">Summary</button> <button class="filter-btn" onclick="showCampaignCalls('${cp.id}')">Calls</button></td></tr>`;
+    }).join('') + '</tbody></table></div></div><div class="note" style="margin-top:8px;">Leads = new numbers to call, after removing invalid numbers, duplicates and existing Kadam drivers. Converted = the number paid rent on or after the lead date.</div>';
+}
+function showCampaignCalls(id) { S.catFilter = { cat: 'camp', tier: null, campaign: id }; setView('queue'); renderQueue(); }
+function closeCModal() { S.cm = null; document.getElementById('cmodal').classList.remove('open'); document.body.style.overflow = ''; }
+function openCModal() { document.getElementById('cmodal').classList.add('open'); document.body.style.overflow = 'hidden'; }
+
+function openAddCampaign() {
+  S.cm = { mode: 'add', url: '', tab: '', segment: '', name: '', nameEdited: false, check: null, msg: '', busy: false };
+  renderAddCampaign(); openCModal();
+}
+function cmSet(k, v) {
+  const m = S.cm; m[k] = v;
+  if (k === 'tab') { if (!m.segment || m.segmentAuto) { m.segment = /cargo/i.test(v) ? 'Cargo' : /auto|passenger/i.test(v) ? 'Passenger' : m.segment; m.segmentAuto = true; } }
+  if (k === 'segment') m.segmentAuto = false;
+  if (k === 'name') m.nameEdited = true;
+  if (k === 'url' || k === 'tab') m.check = null;
+  if (!m.nameEdited) m.name = m.tab ? campaignNameFor(m.tab, S.today, S.campaigns.map(c => c.name)) : '';
+  renderAddCampaign(k);
+}
+function renderAddCampaign(focusKey) {
+  const m = S.cm;
+  document.getElementById('cTitle').textContent = 'Add campaign';
+  document.getElementById('cSub').textContent = 'One tab of a lead sheet per campaign';
+  const ck = m.check;
+  document.getElementById('cBody').innerHTML = `
+    <div class="form-grid">
+      <div class="field full"><label for="cUrl">Sheet link</label><input type="url" id="cUrl" value="${esc(m.url)}" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=..." oninput="cmSet('url', this.value)">
+        <div class="hint">Open the tab with the leads, then copy the link from the address bar (it ends in gid=...). The sheet must be shared as Anyone with the link: Viewer.</div></div>
+      <div class="field"><label for="cTab">Tab name</label><input type="text" id="cTab" value="${esc(m.tab)}" placeholder="e.g. Cargo Leads" oninput="cmSet('tab', this.value)"></div>
+      <div class="field"><label for="cSeg">Segment</label><select id="cSeg" onchange="cmSet('segment', this.value)"><option value="">Choose</option>${['Passenger', 'Cargo'].map(x => `<option ${m.segment === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+      <div class="field full"><label for="cName">Campaign name</label><input type="text" id="cName" value="${esc(m.name)}" oninput="cmSet('name', this.value)">
+        <div class="hint">Tab name + month + year, e.g. cargoOct26. You can change it.</div></div>
+    </div>
+    ${ck ? (ck.error ? `<div class="banner err" style="margin-top:12px;">${esc(ck.error)}</div>` : `<div class="banner ${ck.parsed.leads.length ? 'warn' : 'err'}" style="margin-top:12px;">Sheet read: ${ck.parsed.dataRows} rows, ${ck.parsed.leads.length} unique valid numbers, ${ck.parsed.invalid.length} invalid, ${ck.parsed.dupWithin.length} repeated in the sheet.${ck.parsed.leads.length ? '' : ' No usable leads found: check this is the right tab and it has a phone column.'}</div>`) : ''}
+    <div class="form-actions">
+      <button class="ghost" onclick="checkCampaign()" ${m.busy ? 'disabled' : ''}>Check sheet</button>
+      <button class="primary" onclick="saveCampaign()" ${m.busy || !(ck && !ck.error && ck.parsed.leads.length) ? 'disabled' : ''}>Add campaign</button>
+      <span class="status-msg ${m.msgCls || ''}">${esc(m.msg || '')}</span>
+    </div>`;
+  if (focusKey) { const el = document.getElementById({ url: 'cUrl', tab: 'cTab', name: 'cName' }[focusKey]); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
+}
+async function checkCampaign() {
+  const m = S.cm; const ref = sheetRef(m.url);
+  if (!ref) { m.check = { error: 'That is not a Google Sheets link.' }; return renderAddCampaign(); }
+  m.busy = true; m.msg = 'Reading the sheet…'; m.msgCls = ''; renderAddCampaign();
+  try { m.check = { ref, parsed: parseCampaignSheet(await fetchSheetRows(ref.id, ref.gid), S.today) }; m.msg = ''; }
+  catch (e) { m.check = { error: 'Could not read the sheet (' + (e.message || e) + '). In the sheet, click Share and set General access to Anyone with the link: Viewer, then try again.' }; m.msg = ''; }
+  m.busy = false; renderAddCampaign();
+}
+async function saveCampaign() {
+  const m = S.cm;
+  if (!m.tab.trim()) { m.msg = 'Enter the tab name.'; m.msgCls = 'err'; return renderAddCampaign(); }
+  if (!m.segment) { m.msg = 'Choose the segment.'; m.msgCls = 'err'; return renderAddCampaign(); }
+  if (!m.name.trim()) { m.msg = 'Enter a campaign name.'; m.msgCls = 'err'; return renderAddCampaign(); }
+  if (S.campaigns.some(c => c.name.toLowerCase() === m.name.trim().toLowerCase())) { m.msg = 'A campaign with this name already exists.'; m.msgCls = 'err'; return renderAddCampaign(); }
+  if (S.campaigns.some(c => c.sheet_id === m.check.ref.id && String(c.gid) === String(m.check.ref.gid))) { m.msg = 'This tab is already a campaign.'; m.msgCls = 'err'; return renderAddCampaign(); }
+  m.busy = true; m.msg = 'Saving…'; m.msgCls = ''; renderAddCampaign();
+  const name = m.name.trim();
+  const { error } = await sb.from(CALLS_TABLE).insert({ driver_name: name, caller: CAMPAIGN_CALLER, call_status: CAMPAIGN_MARK, done: false,
+    item_keys: ['campaign|' + name], item_labels: ['Campaign: ' + name],
+    comment: JSON.stringify({ sheet_url: m.url.trim(), sheet_id: m.check.ref.id, gid: String(m.check.ref.gid), tab_name: m.tab.trim(), segment: m.segment }) });
+  if (error) { m.busy = false; m.msg = 'Not saved: ' + error.message; m.msgCls = 'err'; return renderAddCampaign(); }
+  await loadLogs();
+  await loadCampaigns();
+  renderAll();
+  const saved = S.campaigns.find(c => c.name === name);
+  if (saved) openCampaignSummary(saved.id); else closeCModal();
+}
+function openCampaignSummary(id) { S.cm = { mode: 'summary', id }; renderCampaignSummary(); openCModal(); }
+function renderCampaignSummary() {
+  const cp = S.campaigns.find(c => c.id === S.cm.id);
+  if (!cp) return closeCModal();
+  document.getElementById('cTitle').textContent = cp.name;
+  document.getElementById('cSub').textContent = `${cp.segment || ''} campaign, added ${shortDate(istDateOf(cp.created_at))}${cp.tab_name ? ', tab ' + cp.tab_name : ''}`;
+  if (!cp.parsed) { document.getElementById('cBody').innerHTML = `<div class="banner err">${esc(cp.error)}</div>`; return; }
+  const st = campStatsFor(cp), p = cp.parsed;
+  const cell = (k, v, cls) => `<div><div class="k">${esc(k)}</div><div class="v ${cls || ''}">${v}</div></div>`;
+  const list = (title, arr, fmt) => arr.length ? `<details class="howto" style="margin:-6px 0 12px;"><summary>${esc(title)} (${arr.length})</summary><ol>${arr.map(x => `<li>${fmt(x)}</li>`).join('')}</ol></details>` : '';
+  const outs = Object.entries(st.outcomes).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  document.getElementById('cBody').innerHTML = `
+    <div class="sub-h" style="margin-top:0;">List check</div>
+    <div class="stat-grid">
+      ${cell('Rows in sheet', st.rows)}${cell('Invalid numbers', st.invalid, st.invalid ? 'warn' : '')}${cell('Repeated in this sheet', st.dupWithin, st.dupWithin ? 'warn' : '')}${cell('Already in earlier lists', st.dupPrevious, st.dupPrevious ? 'warn' : '')}
+      ${cell('Already Kadam drivers', st.existing, st.existing ? 'warn' : '')}${cell('New leads to call', st.callable, 'ok')}${cell('Total duplicates', st.dupWithin + st.dupPrevious, (st.dupWithin + st.dupPrevious) ? 'warn' : '')}${cell('Unique valid numbers', st.unique)}
+    </div>
+    ${list('Invalid numbers', p.invalid, x => `Row ${x.rowNum}: ${esc(x.name || 'no name')}, <span class="mono">${esc(x.raw || 'blank')}</span>`)}
+    ${list('Repeated in this sheet', p.dupWithin, x => `Row ${x.rowNum}: ${esc(x.name || 'no name')}, <span class="mono">${esc(x.phone)}</span> (first in row ${x.firstRow})`)}
+    ${list('Already in earlier lists', st.dupPreviousList, x => `${esc(x.name || 'no name')}, <span class="mono">${esc(x.phone)}</span>, first in ${esc(x.firstIn)}`)}
+    ${list('Already Kadam drivers', st.existingList, x => `${esc(x.name || 'no name')}, <span class="mono">${esc(x.phone)}</span>, in ledger as ${esc(x.driver)}`)}
+    <div class="sub-h">Calling progress</div>
+    <div class="stat-grid">
+      ${cell('Fresh (no try yet)', st.fresh)}${cell('Tried, not reached', st.tried)}${cell('In RNR', st.rnr)}${cell('Call back scheduled', st.callback)}
+      ${cell('Connected', st.connected)}${cell('Interested', st.interested, 'ok')}${cell('Converted (paid rent)', st.converted, 'ok')}${cell('Connect rate', st.callable ? Math.round((st.connected / st.callable) * 100) + '%' : '-')}
+    </div>
+    ${outs.length ? `<div class="sub-h">What leads said</div><div class="tbl-wrap"><table class="hist"><tbody>${outs.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    <div class="form-actions"><button class="primary" onclick="closeCModal(); showCampaignCalls('${cp.id}')">Show calls for this campaign</button>
+      <a class="filter-btn" style="text-decoration:none;" href="${esc(cp.sheet_url)}" target="_blank" rel="noopener">Open sheet</a></div>`;
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.cm) closeCModal(); });
 
 // ---------- done ----------
 function resultBadge(r) {
@@ -1302,6 +1714,7 @@ function earlierRemarks(key, basis) {
   return S.logs.filter(l => l !== basis && (l.item_keys || []).includes(key) && Date.parse(l.created_at) < Date.parse(basis.created_at))
     .map(l => `${shortDate(istDateOf(l.created_at))} ${l.call_status}${l.comment ? ': ' + l.comment : ''}`).join(' · ');
 }
+function allCallers() { const set = new Set(CALLERS); S.logs.forEach(l => { if (l.caller) set.add(l.caller); }); return Array.from(set); }
 function renderDone() {
   const all = calledItems(ctx()).filter(x => x.done && hubOk(x.hub));
   document.getElementById('cntDone').textContent = all.length;
@@ -1323,8 +1736,8 @@ function renderDone() {
 
   const fb = (key, val, label, kind) => `<button class="filter-btn ${S[kind] === val ? 'active' : ''}" onclick="S.${kind}=${val === null ? 'null' : `'${val}'`}; renderDone();">${label}</button>`;
   document.getElementById('doneFilters').innerHTML =
-    fb('c', null, 'All', 'doneCat') + fb('c', 'rent', 'Rent', 'doneCat') + fb('c', 'join', 'New joiner', 'doneCat') + fb('c', 'exit', 'Exit', 'doneCat') + fb('c', 'svc', 'Service', 'doneCat') + fb('c', 'lead', 'Leads', 'doneCat') +
-    '<span style="width:10px;"></span>' + fb('p', null, 'Both callers', 'doneCaller') + CALLERS.map(c => fb('p', c, c, 'doneCaller')).join('');
+    fb('c', null, 'All', 'doneCat') + fb('c', 'rent', 'Rent', 'doneCat') + fb('c', 'join', 'New joiner', 'doneCat') + fb('c', 'exit', 'Exit', 'doneCat') + fb('c', 'svc', 'Service', 'doneCat') + fb('c', 'lead', 'Instagram', 'doneCat') + fb('c', 'camp', 'Campaigns', 'doneCat') +
+    '<span style="width:10px;"></span>' + fb('p', null, 'All callers', 'doneCaller') + allCallers().map(c => fb('p', c, c, 'doneCaller')).join('');
 
   let rows = all;
   if (S.doneCat) rows = rows.filter(x => x.cat === S.doneCat);
@@ -1337,7 +1750,7 @@ function renderDone() {
   el.innerHTML = `<table><thead><tr><th>Driver</th><th>Call</th><th>Called</th><th>Status</th><th>Outcome / reason</th><th class="hide-sm">Comment</th><th>Result</th></tr></thead><tbody>` +
     rows.map(x => `<tr>
       <td><div class="driver-name">${esc(x.name)}</div><div class="driver-sub">${esc(x.driverId || '')}${x.hub ? ' · ' + esc(hubShort(x.hub)) : ''}${x.vehicle ? ' · ' + esc(x.vehicle) : ''}</div></td>
-      <td>${keyBadge(x.cat, x.tier)}</td>
+      <td>${keyBadge(x.cat, x.tier, x.anchor)}</td>
       <td style="white-space:nowrap; font-size:12px;">${callTime(x.log.created_at)}<div class="driver-sub">${esc(x.log.caller)}${x.attempts > 1 ? `, ${x.attempts} tries` : ''}</div></td>
       <td style="font-size:12.5px;">${esc(x.log.call_status)}</td>
       <td style="font-size:12.5px;">${esc([x.log.outcome, x.log.comeback_date ? 'on ' + shortDate(x.log.comeback_date) : null, x.log.reason].filter(Boolean).join(', ') || '-')}</td>
@@ -1391,7 +1804,7 @@ function renderImpact() {
 
 // ---------- start ----------
 refreshAll(false);
-setInterval(async () => { if (!sb || S.tableMissing) return; try { await loadLogs(); if (!S.current) renderAll(); else { renderQueue(); renderDone(); renderImpact(); } } catch (e) {} }, 60000);
+setInterval(async () => { if (!sb || S.tableMissing) return; try { await loadLogs(); if (!S.current && !S.cm) renderAll(); else { S.Q = buildQueue(ctx()); renderQueue(); renderRnr(); renderCampaigns(); renderDone(); renderImpact(); } } catch (e) {} }, 60000);
 </script>
 </body>
 </html>
