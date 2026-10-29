@@ -86,6 +86,9 @@ th.ctr,td.ctr{text-align:center;}
 .b-rent10{background:rgba(159,18,57,0.14); color:#9f1239;}
 .b-join{background:rgba(37,99,235,0.12); color:var(--blue);}
 .b-exit{background:rgba(124,58,237,0.12); color:var(--purple);}
+.owner{display:inline-block; font-size:12px; font-weight:600; padding:3px 10px; border-radius:20px; white-space:nowrap;}
+.owner-0{background:rgba(219,39,119,0.10); color:#9d174d;}
+.owner-1{background:rgba(37,99,235,0.10); color:#1e40af;}
 .b-inc{background:rgba(14,116,144,0.12); color:#0e7490;}
 .kpi.c-inc{color:#0e7490;}
 .b-camp{background:rgba(79,70,229,0.12); color:#4338ca;}
@@ -229,6 +232,7 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
     <div class="section-head">
       <h2 id="queueTitle">Call list</h2>
       <div class="filters">
+        <span class="filters" id="queueOwners"></span>
         <input class="search" id="queueSearch" placeholder="Search name, ID or phone" oninput="renderQueueTable()">
         <button class="filter-btn" onclick="refreshAll(true)">Refresh</button>
       </div>
@@ -253,7 +257,7 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
   <div class="section">
     <div class="section-head">
       <h2>Not picking up</h2>
-      <div class="filters"><input class="search" id="rnrSearch" placeholder="Search name, ID or phone" oninput="renderRnr()"></div>
+      <div class="filters"><span class="filters" id="rnrOwners"></span><input class="search" id="rnrSearch" placeholder="Search name, ID or phone" oninput="renderRnr()"></div>
     </div>
     <div class="note" style="margin-bottom:10px;">Drivers and leads with 7 or more unanswered tries over 10 or more days move here from To call. They can still be called; connecting with a remark moves them to Done.</div>
     <div class="tbl-wrap"><div class="tbl-scroll" id="rnrTable"></div></div>
@@ -856,6 +860,7 @@ function buildQueue(ctx) {
     return r;
   });
   list.sort((a, b) => (a.triedToday - b.triedToday) || (b.score - a.score) || String(a.openSince || '').localeCompare(String(b.openSince || '')) || String(a.name).localeCompare(String(b.name)));
+  assignOwners(list, ctx.logs);
   list.forEach(r => {
     Object.assign(r, rnrInfo(r.items.map(i => itemPrefix(i.key)), ctx.logs, ctx.today));
     const last = r.attempts[r.attempts.length - 1];
@@ -864,6 +869,31 @@ function buildQueue(ctx) {
   return { rows: list.filter(r => !r.rnr && !r.snoozedUntil), rnr: list.filter(r => r.rnr && !r.snoozedUntil),
     snoozed: list.filter(r => r.snoozedUntil), all: list, items, byItem };
 }
+
+// ---------- who calls whom ----------
+// Each person belongs to the current caller who called them first (any call type, matched by Kadam
+// ID or phone, so a lead who becomes a driver stays with the same caller). Never called, or only
+// called by someone who has left: split by phone number, fixed so it never moves.
+function hashPick(key) { let h = 5381; const s = String(key || ''); for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return CALLERS[h % CALLERS.length]; }
+function firstCallerIndex(logs) {
+  const byId = {}, byPhone = {};
+  (logs || []).slice().sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)).forEach(l => {
+    if (!CALLERS.includes(l.caller)) return;
+    if (l.driver_id && !byId[l.driver_id]) byId[l.driver_id] = l;
+    const phones = new Set(); const p0 = phone10(l.phone); if (p0) phones.add(p0);
+    (l.item_keys || []).forEach(k => { const m = k.match(/\|ph:(\d{10})\|/); if (m) phones.add(m[1]); });
+    phones.forEach(p => { if (!byPhone[p]) byPhone[p] = l; });
+  });
+  return { byId, byPhone };
+}
+function ownerFor(r, idx) {
+  const ph = phone10(r.phone);
+  const cands = [r.driverId && idx.byId[r.driverId], ph && idx.byPhone[ph]].filter(Boolean)
+    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  if (cands.length) return { owner: cands[0].caller, ownerHow: 'first call' };
+  return { owner: hashPick(ph || r.driverId || r.rowKey), ownerHow: 'auto' };
+}
+function assignOwners(rows, logs) { const idx = firstCallerIndex(logs); rows.forEach(r => Object.assign(r, ownerFor(r, idx))); return rows; }
 
 // The same call across steps: cat|who|anchor (rent lapse, joiner, lead, exit, service)
 function itemPrefix(key) { return key.split('|').slice(0, 3).join('|'); }
@@ -1165,7 +1195,7 @@ function leavesFor(driverId, name, ctx) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
-  INCOMING_SOURCES, summaryDefaultDay, daySummary, logCat, istTime, detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
+  hashPick, ownerFor, assignOwners, firstCallerIndex, INCOMING_SOURCES, summaryDefaultDay, daySummary, logCat, istTime, detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
   buildLeadIndex, campaignStats, rnrInfo, itemPrefix, existingDriver,
   LEAD_OUTCOMES, parseLeadForm, buildPhoneRent, leadOnboarded, phone10,
   SERVICE_OUTCOMES, MASTER_VEHICLES, parseServiceTracker, sheetDay, normReg, driversOnVehicle,
@@ -1440,14 +1470,24 @@ function rowSub(r) {
   if (it.cat === 'svc') return esc(it.matchHow === 'nodata' ? 'check-in data not uploaded yet for ' + it.vehicle : 'no check-in on ' + it.vehicle + ' that day');
   return 'not matched to ledger';
 }
+function ownerTag(r) {
+  const i = CALLERS.indexOf(r.owner);
+  return `<span class="owner owner-${i < 0 ? 0 : i}" title="${r.ownerHow === 'first call' ? esc(r.owner) + ' called them first, so all their calls go to her' : 'Not called yet, given to ' + esc(r.owner) + ' by phone number'}">${esc(r.owner || '-')}</span>`;
+}
+function ownerOk(r) { return !S.ownerFilter || r.owner === S.ownerFilter; }
+function ownerChips(rows, rerender) {
+  const b = (v, label) => `<button class="filter-btn ${S.ownerFilter === v ? 'active' : ''}" onclick="S.ownerFilter=${v ? `'${v}'` : 'null'}; ${rerender}">${esc(label)}</button>`;
+  return b(null, `All ${rows.length}`) + CALLERS.map(c => b(c, `${c} ${rows.filter(r => r.owner === c).length}`)).join('');
+}
 function rowsTableHtml(rows, mode) {
-  return `<table><thead><tr><th>Driver</th><th class="hide-sm">Hub</th><th>Phone</th><th>Why call</th><th class="hide-sm">Last rent</th><th class="hide-sm">${mode === 'rnr' ? 'Unanswered since' : 'Waiting since'}</th><th class="ctr">${mode === 'rnr' ? 'Unanswered' : 'Tries'}</th><th class="hide-sm">Last try</th><th></th></tr></thead><tbody>` +
+  return `<table><thead><tr><th>Driver</th><th>Caller</th><th class="hide-sm">Hub</th><th>Phone</th><th>Why call</th><th class="hide-sm">Last rent</th><th class="hide-sm">${mode === 'rnr' ? 'Unanswered since' : 'Waiting since'}</th><th class="ctr">${mode === 'rnr' ? 'Unanswered' : 'Tries'}</th><th class="hide-sm">Last try</th><th></th></tr></thead><tbody>` +
     rows.map(r => {
       const d = r.driverId ? S.drivers[r.driverId] : null;
       const last = r.lastAttempt;
       const since = mode === 'rnr' ? r.unansweredSince : r.openSince;
       return `<tr class="queue-row ${mode !== 'rnr' && r.triedToday ? 'tried' : ''}">
         <td><div class="driver-name">${esc(r.driverId ? r.name : (r.items[0].cat === 'svc' ? 'No driver found' : r.name))}</div><div class="driver-sub">${rowSub(r)}</div></td>
+        <td>${ownerTag(r)}</td>
         <td class="hide-sm">${esc(r.hub ? hubShort(r.hub) : '-')}</td>
         <td class="mono" style="font-size:12px;">${esc(r.phone || '-')}</td>
         <td>${r.items.map(itemBadge).join('')}</td>
@@ -1462,6 +1502,8 @@ function rowsTableHtml(rows, mode) {
 function renderRnr() {
   let rows = rnrRows();
   document.getElementById('cntRnr').textContent = rows.length;
+  document.getElementById('rnrOwners').innerHTML = ownerChips(rows, 'renderRnr();');
+  rows = rows.filter(ownerOk);
   const qv = (document.getElementById('rnrSearch').value || '').trim().toLowerCase();
   if (qv) rows = rows.filter(r => [r.name, r.driverId, r.phone].some(x => String(x || '').toLowerCase().includes(qv)));
   S.rnrOrder = rows.map(r => r.rowKey);
@@ -1480,7 +1522,7 @@ function renderQueue() {
   const byCaller = CALLERS.map(c => `${c} ${logsToday.filter(l => l.caller === c).length}`).join(', ');
   const pct = logsToday.length ? ` <span class="pct-chip">${Math.round(conToday / logsToday.length * 100)}%</span>` : '';
   document.getElementById('summaryRow').innerHTML = `
-    <div class="total-card"><div class="label">To call</div><div class="value">${rows.length}</div><div class="foot">${leads ? 'leads' : 'drivers'} with an open call</div></div>
+    <div class="total-card"><div class="label">To call</div><div class="value">${rows.length}</div><div class="foot">${CALLERS.map(c => `${c} ${rows.filter(r => r.owner === c).length}`).join(', ')}</div></div>
     <div class="total-card"><div class="label">Calls made today</div><div class="value">${logsToday.length}</div><div class="foot">${esc(byCaller)}</div></div>
     <div class="total-card"><div class="label">Connected today</div><div class="value">${conToday}${pct}</div><div class="foot">of calls made today</div></div>
     <div class="total-card"><div class="label">Done, all time</div><div class="value">${doneAll}</div><div class="foot">calls closed, see Done tab</div></div>`;
@@ -1541,6 +1583,8 @@ function setCat(cat, tier, campaign) {
 function renderQueueTable() {
   let rows = queueRows();
   if (S.catFilter) rows = rows.filter(r => r.items.some(i => i.cat === S.catFilter.cat && (S.catFilter.tier === null || i.tier === S.catFilter.tier) && (!S.catFilter.campaign || (i.campaign && i.campaign.id === S.catFilter.campaign))));
+  document.getElementById('queueOwners').innerHTML = ownerChips(rows, 'renderQueue();');
+  rows = rows.filter(ownerOk);
   const qv = (document.getElementById('queueSearch').value || '').trim().toLowerCase();
   if (qv) rows = rows.filter(r => [r.name, r.driverId, r.phone].some(x => String(x || '').toLowerCase().includes(qv)));
   document.getElementById('queueTitle').innerHTML = S.catFilter
@@ -1559,7 +1603,8 @@ function renderQueueTable() {
 function openRow(rowKey, list) {
   S.lastOrder = list === 'rnr' ? (S.rnrOrder || []) : (S.queueOrder || []); S.lastList = list || 'queue';
   const savedCaller = lsGet('portalCaller');
-  S.current = { rowKey, form: { caller: CALLERS.includes(savedCaller) ? savedCaller : '', status: '', outcome: '', reason: '', comeback: '', comment: '', }, msg: '' };
+  const rowNow = ((S.Q || buildQueue(ctx())).all || []).find(r => r.rowKey === rowKey);
+  S.current = { rowKey, form: { caller: rowNow && CALLERS.includes(rowNow.owner) ? rowNow.owner : (CALLERS.includes(savedCaller) ? savedCaller : ''), status: '', outcome: '', reason: '', comeback: '', comment: '', }, msg: '' };
   renderModal();
   document.getElementById('modal').classList.add('open');
   document.body.style.overflow = 'hidden';
