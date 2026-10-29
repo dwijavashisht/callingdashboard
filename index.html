@@ -49,7 +49,7 @@ button,select,input,textarea{font:inherit;}
 .section-head h2{font-size:19px; font-weight:600;}
 .note{font-size:12px; color:var(--ink-dim); font-family:'IBM Plex Mono',monospace;}
 
-.kpi-groups{display:grid; grid-template-columns:3fr 3fr 1fr 1fr 1fr 1fr; gap:14px;}
+.kpi-groups{display:grid; grid-template-columns:3fr 3fr 1fr 1fr; gap:14px;}
 .kpi-group .glabel{font-size:12px; color:var(--ink-dim); margin:0 0 6px 2px; font-weight:500;}
 .kpis{display:grid; gap:10px;}
 .kpis.k3{grid-template-columns:repeat(3,1fr);}
@@ -206,7 +206,8 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
 </div>
 
 <div class="view-nav">
-  <button class="view-nav-btn active" id="navQueue" onclick="setView('queue')">To call <span class="cnt" id="cntQueue">0</span></button>
+  <button class="view-nav-btn active" id="navLeads" onclick="setQueueMode('leads')">To call - new leads <span class="cnt" id="cntLeads">0</span></button>
+  <button class="view-nav-btn" id="navDrivers" onclick="setQueueMode('drivers')">To call - existing drivers <span class="cnt" id="cntDrivers">0</span></button>
   <button class="view-nav-btn" id="navRnr" onclick="setView('rnr')">RNR <span class="cnt" id="cntRnr">0</span></button>
   <button class="view-nav-btn" id="navCampaigns" onclick="setView('campaigns')">Campaigns <span class="cnt" id="cntCampaigns">0</span></button>
   <button class="view-nav-btn" id="navDone" onclick="setView('done')">Done <span class="cnt" id="cntDone">0</span></button>
@@ -218,7 +219,7 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
 <div id="viewQueue">
   <div class="summary-row" id="summaryRow"></div>
   <div class="section">
-    <div class="section-head"><h2>Who to call</h2><span class="note">click a box to filter the list</span></div>
+    <div class="section-head"><h2 id="whoTitle">Who to call</h2><span class="note">click a box to filter the list</span></div>
     <div class="kpi-groups" id="catKpis"></div>
   </div>
   <div class="section">
@@ -230,7 +231,7 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
       </div>
     </div>
     <div class="tbl-wrap"><div class="tbl-scroll" id="queueTable"></div></div>
-    <div class="note" style="margin-top:8px;">Calls stay until connected with a remark. Rent calls drop off only if the driver pays. Drivers tried today but not connected drop to the bottom, faded.</div>
+    <div class="note" style="margin-top:8px;" id="queueNote">Calls stay until connected with a remark. Rent calls drop off only if the driver pays. Drivers tried today but not connected drop to the bottom, faded.</div>
   </div>
 </div>
 
@@ -317,7 +318,7 @@ const REASONS = ['Vehicle issue', 'Charging issue', 'Low earnings', 'Health', 'F
   'Joined another fleet or platform', 'Issue with hub staff', 'Other'];
 const CALLERS = ['Jyoti', 'Nandani'];   // Swati left in Oct 2026; her past calls stay in history
 const RNR_DAYS = 10, RNR_MIN_TRIES = 7; // unanswered for 10+ days with 7+ tries -> RNR tab
-const CAMP_OUTCOMES = ['Interested, coming to hub', 'Interested, call back later', 'Interested in other segment',
+const CAMP_OUTCOMES = ['Interested, coming to hub', 'Interested, call back later', 'Interested in cargo', 'Interested in passenger',
   'Not interested', 'Not eligible', 'Already driving with another fleet', 'Not in Delhi NCR'];
 const CAMP_SNOOZE_OUTCOME = 'Interested, call back later';      // stays open, returns on the call-back date
 const CAMP_DATE_OUTCOMES = ['Interested, coming to hub', 'Interested, call back later'];
@@ -532,9 +533,10 @@ function prettyAnswer(a) { return String(a || '').replace(/_/g, ' ').replace(/\s
 function parseCampaignSheet(rows, today) {
   rows = (rows || []).filter(r => (r || []).some(x => String(x || '').trim() !== ''));
   const hi = rows.findIndex(r => r.some(x => /phone|mobile/i.test(x || '')));
-  const out = { dataRows: 0, leads: [], invalid: [], dupWithin: [], headerFound: hi >= 0 };
+  const out = { dataRows: 0, leads: [], invalid: [], dupWithin: [], headerFound: hi >= 0, headers: [] };
   if (hi < 0) return out;
   const H = rows[hi].map(x => String(x || '').trim());
+  out.headers = H;
   const find = re => H.findIndex(x => re.test(x));
   const pCol = find(/phone|mobile/i);
   let nCol = find(/full[_\s]?name/i); if (nCol < 0) nCol = find(/name/i);
@@ -558,6 +560,13 @@ function parseCampaignSheet(rows, today) {
     seen[phone] = lead; out.leads.push(lead);
   });
   return out;
+}
+// Cargo or Passenger from the tab name and question headers; null when unclear (the user picks)
+function detectSegment(tabName, headers) {
+  const t = (String(tabName || '') + ' ' + (headers || []).join(' ')).toLowerCase().replace(/[_\/\-]+/g, ' ');
+  const cargo = /\b(cargo|delivery|deliveries|logistics?|parcel|loader|goods)\b/.test(t);
+  const pass = /\b(auto|passenger|rickshaw|erickshaw|e rickshaw|rapido|sawari|savari)\b/.test(t);
+  return cargo && !pass ? 'Cargo' : pass && !cargo ? 'Passenger' : null;
 }
 function campaignNameFor(tabName, today, existing) {
   const word = (String(tabName || '').trim().split(/\s+/)[0] || 'leads').toLowerCase().replace(/[^a-z0-9]/g, '') || 'leads';
@@ -796,7 +805,10 @@ function itemScore(it) {
 function buildQueue(ctx) {
   const items = buildItems(ctx);
   const byItem = logsByItem(ctx.logs);
-  const open = items.filter(it => !(byItem[it.key] || []).some(l => l.done));
+  // a campaign lead number already closed in any campaign (e.g. one later removed and re-added) stays closed
+  const doneLeadPhones = new Set();
+  (ctx.logs || []).forEach(l => { if (l.done) (l.item_keys || []).forEach(k => { if (k.startsWith('camp|ph:')) doneLeadPhones.add(k.split('|')[1]); }); });
+  const open = items.filter(it => !(byItem[it.key] || []).some(l => l.done) && !(it.cat === 'camp' && doneLeadPhones.has('ph:' + it.phone)));
   const rows = {};
   open.forEach(it => {
     const rk = it.cat === 'lead' ? `lead:${it.phone}` : it.cat === 'camp' ? `camp:${it.phone}` : it.cat === 'svc' ? `svc:${it.driverId || 'veh'}:${it.vehicle}:${it.anchor}:${it.tier}`
@@ -859,7 +871,9 @@ function campaignStats(cp, ctx, q) {
     if (existingDriver(l.phone, date, ctx.phoneRent)) { s.existing++; s.existingList.push({ name: l.name, phone: l.phone, driver: ctx.phoneRent[l.phone].driver }); return; }
     s.callable++;
     const key = `camp|ph:${l.phone}|${cp.id}`;
-    const logs = byItem[key] || [];
+    // calls on this number under any campaign count (e.g. a campaign removed and added again)
+    const logs = (ctx.logs || []).filter(x => (x.item_keys || []).some(k => k.startsWith(`camp|ph:${l.phone}|`)))
+      .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
     const converted = !!leadOnboarded({ phone: l.phone, date }, ctx.phoneRent);
     if (converted) s.converted++;
     if (converted && !logs.length) { s.convertedUncalled = (s.convertedUncalled || 0) + 1; return; }
@@ -1055,7 +1069,7 @@ function leavesFor(driverId, name, ctx) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
-  CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
+  detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
   buildLeadIndex, campaignStats, rnrInfo, itemPrefix, existingDriver,
   LEAD_OUTCOMES, parseLeadForm, buildPhoneRent, leadOnboarded, phone10,
   SERVICE_OUTCOMES, MASTER_VEHICLES, parseServiceTracker, sheetDay, normReg, driversOnVehicle,
@@ -1074,7 +1088,10 @@ const SUPABASE_ANON_KEY = 'sb_publishable_e6t8GrHCcaMyBJMoBZydSg_Ot8fi551';
 const CALLS_TABLE = 'calling_portal_calls';
 // Campaigns are stored as marker rows in the calls table, so no extra Supabase table is needed.
 // These rows are kept out of every call count.
-const CAMPAIGN_MARK = 'Campaign added', CAMPAIGN_CALLER = 'Portal';
+const CAMPAIGN_MARK = 'Campaign added', CAMPAIGN_REMOVED = 'Campaign removed', CAMPAIGN_CALLER = 'Portal';
+// Google Sheets API key, used only to list a sheet's tabs. Restrict it to the Sheets API and this
+// site's address in Google Cloud. Leave blank to read only the tab in the pasted link.
+const SHEETS_API_KEY = 'AIzaSyCg10_BuR-Qfd4XvthhjCDX8gaCqenTRCE';
 const LEAVE_KEY = '1900-01-06', EXIT_KEY = '1900-01-07';
 const SESSION_DAYS = 16;
 const MAINTENANCE_SHEET_ID = '1w0wODcvdp1_iMmcKZDFLxsb55mh27SotsXZfUK0ZtU0';
@@ -1086,7 +1103,7 @@ try { sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE
 const S = {
   drivers: {}, sessions: {}, leaves: [], exits: [], logs: [], today: null, ref: null,
   leaveUploadedAt: null, tableMissing: false, loadError: null, services: [], svcError: null, svcSource: null, leads: [], leadError: null, phoneRent: {}, campaigns: [], campTableMissing: false, Q: null, lastOrder: [], cm: null,
-  view: 'queue', catFilter: null, hub: null, doneCat: null, doneCaller: null, current: null,
+  view: 'queue', queueMode: 'leads', catFilter: null, hub: null, doneCat: null, doneCaller: null, current: null,
 };
 
 function esc(s) { return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -1197,7 +1214,7 @@ async function loadCampaigns() {
   const list = (S.campaignRows || []).map(r => {
     let meta = {}; try { meta = JSON.parse(r.comment || '{}'); } catch (e) {}
     return { id: r.id, created_at: r.created_at, name: r.driver_name, sheet_url: meta.sheet_url, sheet_id: meta.sheet_id, gid: meta.gid || '0', tab_name: meta.tab_name, segment: meta.segment };
-  }).filter(c => c.name && c.sheet_id).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  }).filter(c => c.name && c.sheet_id && !(S.removedCampaignIds || new Set()).has(c.id)).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
   S.campaigns = await Promise.all(list.map(async cp => {
     try { return { ...cp, parsed: parseCampaignSheet(await fetchSheetRows(cp.sheet_id, cp.gid), S.today), error: null }; }
     catch (e) { return { ...cp, parsed: null, error: 'Could not read this sheet (' + (e.message || e) + '). Check it is shared as Anyone with the link: Viewer.' }; }
@@ -1212,8 +1229,10 @@ async function loadLogs() {
   }
   S.tableMissing = false;
   const rows = data || [];
-  S.logs = rows.filter(l => l.call_status !== CAMPAIGN_MARK);
+  const marks = [CAMPAIGN_MARK, CAMPAIGN_REMOVED];
+  S.logs = rows.filter(l => !marks.includes(l.call_status));
   S.campaignRows = rows.filter(l => l.call_status === CAMPAIGN_MARK);
+  S.removedCampaignIds = new Set(rows.filter(l => l.call_status === CAMPAIGN_REMOVED).map(l => { try { return JSON.parse(l.comment || '{}').id; } catch (e) { return null; } }).filter(Boolean));
 }
 
 async function refreshAll(manual) {
@@ -1271,12 +1290,21 @@ function renderHubFilters() {
 }
 function setHub(k) { S.hub = k; renderAll(); }
 
+const LEAD_CATS = ['lead', 'camp'];
+function isLeadRow(r) { return LEAD_CATS.includes(r.items[0].cat); }
+function isLeadLog(l) { return (l.item_keys || []).some(k => k.startsWith('lead|') || k.startsWith('camp|')); }
 function setView(v) {
   S.view = v;
   ['queue', 'rnr', 'campaigns', 'done', 'impact'].forEach(x => {
     document.getElementById('view' + x[0].toUpperCase() + x.slice(1)).style.display = x === v ? '' : 'none';
-    document.getElementById('nav' + x[0].toUpperCase() + x.slice(1)).classList.toggle('active', x === v);
+    if (x !== 'queue') document.getElementById('nav' + x[0].toUpperCase() + x.slice(1)).classList.toggle('active', x === v);
   });
+  document.getElementById('navLeads').classList.toggle('active', v === 'queue' && S.queueMode === 'leads');
+  document.getElementById('navDrivers').classList.toggle('active', v === 'queue' && S.queueMode === 'drivers');
+}
+function setQueueMode(mode) {
+  if (S.queueMode !== mode) S.catFilter = null;
+  S.queueMode = mode; setView('queue'); renderQueue();
 }
 
 function itemBadge(it) {
@@ -1299,7 +1327,8 @@ function itemLabel(it) {
   return 'Exit notice';
 }
 
-function queueRows() { return (S.Q || buildQueue(ctx())).rows.filter(r => hubOk(r.hub)); }
+function allQueueRows() { return (S.Q || buildQueue(ctx())).rows.filter(r => hubOk(r.hub)); }
+function queueRows() { const leads = S.queueMode === 'leads'; return allQueueRows().filter(r => isLeadRow(r) === leads); }
 function rnrRows() { return (S.Q || buildQueue(ctx())).rnr.filter(r => hubOk(r.hub)); }
 function rowSub(r) {
   const it = r.items[0];
@@ -1339,25 +1368,47 @@ function renderRnr() {
 
 function renderQueue() {
   const rows = queueRows();
-  document.getElementById('cntQueue').textContent = rows.length;
-  const logsToday = S.logs.filter(l => istDateOf(l.created_at) === S.today && hubOk(l.hub));
+  const leads = S.queueMode === 'leads';
+  const all = allQueueRows();
+  document.getElementById('cntLeads').textContent = all.filter(isLeadRow).length;
+  document.getElementById('cntDrivers').textContent = all.filter(r => !isLeadRow(r)).length;
+  const logsToday = S.logs.filter(l => istDateOf(l.created_at) === S.today && hubOk(l.hub) && isLeadLog(l) === leads);
   const conToday = logsToday.filter(l => l.call_status === 'Connected').length;
-  const doneAll = calledItems(ctx()).filter(x => x.done && hubOk(x.hub)).length;
+  const doneAll = calledItems(ctx()).filter(x => x.done && hubOk(x.hub) && LEAD_CATS.includes(x.cat) === leads).length;
   const byCaller = CALLERS.map(c => `${c} ${logsToday.filter(l => l.caller === c).length}`).join(', ');
   const pct = logsToday.length ? ` <span class="pct-chip">${Math.round(conToday / logsToday.length * 100)}%</span>` : '';
   document.getElementById('summaryRow').innerHTML = `
-    <div class="total-card"><div class="label">To call</div><div class="value">${rows.length}</div><div class="foot">drivers with an open call</div></div>
+    <div class="total-card"><div class="label">To call</div><div class="value">${rows.length}</div><div class="foot">${leads ? 'leads' : 'drivers'} with an open call</div></div>
     <div class="total-card"><div class="label">Calls made today</div><div class="value">${logsToday.length}</div><div class="foot">${esc(byCaller)}</div></div>
     <div class="total-card"><div class="label">Connected today</div><div class="value">${conToday}${pct}</div><div class="foot">of calls made today</div></div>
     <div class="total-card"><div class="label">Done, all time</div><div class="value">${doneAll}</div><div class="foot">calls closed, see Done tab</div></div>`;
 
-  const count = (cat, tier) => rows.filter(r => r.items.some(i => i.cat === cat && (tier === null || i.tier === tier))).length;
-  const card = (cat, tier, label, foot, cls) => {
-    const on = S.catFilter && S.catFilter.cat === cat && S.catFilter.tier === tier;
-    return `<button class="kpi ${cls} ${on ? 'active-filter' : ''}" onclick="setCat('${cat}', ${tier === null ? 'null' : tier})">
-      <div class="label">${esc(label)}</div><div class="value">${count(cat, tier)}</div><div class="foot">${esc(foot)}</div></button>`;
+  const count = (cat, tier, cid) => rows.filter(r => r.items.some(i => i.cat === cat && (tier === null || i.tier === tier) && (!cid || (i.campaign && i.campaign.id === cid)))).length;
+  const card = (cat, tier, label, foot, cls, cid) => {
+    const on = S.catFilter && S.catFilter.cat === cat && S.catFilter.tier === tier && (S.catFilter.campaign || null) === (cid || null);
+    return `<button class="kpi ${cls} ${on ? 'active-filter' : ''}" onclick="setCat('${cat}', ${tier === null ? 'null' : tier}${cid ? `, '${cid}'` : ''})">
+      <div class="label">${esc(label)}</div><div class="value">${count(cat, tier, cid)}</div><div class="foot">${esc(foot)}</div></button>`;
   };
-  document.getElementById('catKpis').innerHTML = `
+  const kg = document.getElementById('catKpis');
+  document.getElementById('queueNote').textContent = leads
+    ? 'Leads stay until connected with a remark, and drop off once the number pays rent. Leads tried today but not connected drop to the bottom, faded.'
+    : 'Calls stay until connected with a remark. Rent calls drop off only if the driver pays. Drivers tried today but not connected drop to the bottom, faded.';
+  if (leads) {
+    const camps = S.campaigns.filter(c => c.parsed);
+    kg.style.gridTemplateColumns = window.innerWidth > 1000 ? 'minmax(200px,1fr) 3fr' : '1fr';
+    kg.innerHTML = `
+    <div class="kpi-group"><div class="glabel">Instagram</div><div class="kpis" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));">
+      ${card('lead', null, 'New lead - Instagram', 'until called or onboarded', 'c-lead')}
+    </div></div>
+    <div class="kpi-group"><div class="glabel">Campaigns</div><div class="kpis" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));">
+      ${card('camp', null, 'All campaigns', camps.length + ' campaign' + (camps.length === 1 ? '' : 's'), 'c-camp')}
+      ${camps.slice().reverse().map(c => card('camp', null, c.name, c.segment || '', 'c-camp', c.id)).join('')}
+    </div></div>`;
+    renderQueueTable();
+    return;
+  }
+  kg.style.gridTemplateColumns = '';
+  kg.innerHTML = `
     <div class="kpi-group"><div class="glabel">Rent not paid</div><div class="kpis k3">
       ${card('rent', 3, '3 days', '3 to 4 days', 'c-amber')}
       ${card('rent', 5, '5 days', '5 to 9 days', 'c-rose')}
@@ -1371,20 +1422,15 @@ function renderQueue() {
     <div class="kpi-group"><div class="glabel">Retention</div><div class="kpis k1">
       ${card('exit', null, 'Exit notice', 'last working day from 15 Sep', 'c-purple')}
     </div></div>
-    <div class="kpi-group"><div class="glabel">Leads</div><div class="kpis k1">
-      ${card('lead', null, 'New lead - Instagram', 'until called or onboarded', 'c-lead')}
-    </div></div>
-    <div class="kpi-group"><div class="glabel">Campaigns</div><div class="kpis k1">
-      ${card('camp', null, 'Campaign leads', 'from the Campaigns tab', 'c-camp')}
-    </div></div>
     <div class="kpi-group"><div class="glabel">Service</div><div class="kpis k1">
       ${card('svc', null, 'Service feedback', 'services done from 20 Sep', 'c-svc')}
     </div></div>`;
   renderQueueTable();
 }
 
-function setCat(cat, tier) {
-  S.catFilter = (S.catFilter && S.catFilter.cat === cat && S.catFilter.tier === tier) ? null : { cat, tier };
+function setCat(cat, tier, campaign) {
+  const same = S.catFilter && S.catFilter.cat === cat && S.catFilter.tier === tier && (S.catFilter.campaign || null) === (campaign || null);
+  S.catFilter = same ? null : { cat, tier, campaign: campaign || null };
   renderQueue();
 }
 
@@ -1395,7 +1441,7 @@ function renderQueueTable() {
   if (qv) rows = rows.filter(r => [r.name, r.driverId, r.phone].some(x => String(x || '').toLowerCase().includes(qv)));
   document.getElementById('queueTitle').innerHTML = S.catFilter
     ? `Call list: ${esc(S.catFilter.campaign ? campaignNameById(S.catFilter.campaign) : itemLabel(S.catFilter))} <button class="filter-btn" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="S.catFilter=null; renderQueue();">Show all</button>`
-    : 'Call list';
+    : (S.queueMode === 'leads' ? 'New leads to call' : 'Existing drivers to call');
   S.queueOrder = rows.map(r => r.rowKey);
   const el = document.getElementById('queueTable');
   if (!rows.length) {
@@ -1514,7 +1560,7 @@ function renderModal() {
   const leaveHtml = leaves.length ? `<div class="sub-h">Leave on file</div><div class="tbl-wrap"><table class="hist"><tbody>${leaves.map(l => `<tr><td>${shortDate(l.startDate)} to ${shortDate(l.endDate)}</td><td>${esc(l.reason || '')}</td></tr>`).join('')}</tbody></table></div>` : '';
 
   const rowKeys = new Set(row.items.map(i => i.key));
-  const allLogs = S.logs.filter(l => (row.driverId && l.driver_id === row.driverId) || (l.item_keys || []).some(k => rowKeys.has(k)) || (!row.driverId && !isSvc && (l.driver_name || '').toLowerCase() === String(row.name).toLowerCase()));
+  const allLogs = S.logs.filter(l => (row.driverId && l.driver_id === row.driverId) || (l.item_keys || []).some(k => rowKeys.has(k)) || ((isCamp || isLead) && row.phone && (l.item_keys || []).some(k => k.startsWith('camp|ph:' + row.phone + '|') || k.startsWith('lead|ph:' + row.phone + '|'))) || (!row.driverId && !isSvc && (l.driver_name || '').toLowerCase() === String(row.name).toLowerCase()));
   const logLabelBadges = l => (l.item_keys || []).map(k => { const p = k.split('|'); return keyBadge(p[0], p[3] ? Number(p[3]) : null, p[2]); }).join('');
   const histHtml = `<div class="sub-h" style="margin-top:0;">Previous calls with this ${row.driverId ? 'driver' : 'number'}${allLogs.length ? ` (${allLogs.length})` : ''}</div>` + (allLogs.length
     ? `<div class="tbl-wrap" style="margin-bottom:14px;"><div class="tbl-scroll"><table class="hist"><thead><tr><th>When</th><th>Call about</th><th>By</th><th>Status</th><th>Outcome / reason</th><th>Remark</th></tr></thead><tbody>${allLogs.slice().reverse().map(l => `<tr><td style="white-space:nowrap;">${callTime(l.created_at)}${l.done ? ' <span class="badge b-ok">done</span>' : ''}</td><td>${logLabelBadges(l)}</td><td>${esc(l.caller)}</td><td>${esc(l.call_status)}</td><td>${esc([l.outcome, l.comeback_date ? 'on ' + shortDate(l.comeback_date) : null, l.reason].filter(Boolean).join(', ') || '-')}</td><td style="min-width:200px;">${esc(l.comment || '')}</td></tr>`).join('')}</tbody></table></div></div>`
@@ -1597,93 +1643,151 @@ function renderCampaigns() {
   if (!S.campaigns.length) { el.innerHTML = '<div class="tbl-wrap"><div class="empty">No campaigns yet. Click Add campaign and paste the link to a lead sheet tab.</div></div>'; return; }
   el.innerHTML = `<div class="tbl-wrap"><div class="tbl-scroll"><table><thead><tr><th>Campaign</th><th class="hide-sm">Added</th><th class="num">Leads</th><th class="num">Fresh</th><th class="num hide-sm">Tried</th><th class="num hide-sm">RNR</th><th class="num">Connected</th><th class="num">Interested</th><th class="num">Converted</th><th></th></tr></thead><tbody>` +
     S.campaigns.slice().reverse().map(cp => {
-      if (!cp.parsed) return `<tr><td><div class="driver-name">${esc(cp.name)}</div><div class="driver-sub">${esc(cp.segment || '')}</div></td><td colspan="8" style="color:var(--rose); font-size:12.5px;">${esc(cp.error)}</td><td><button class="filter-btn" onclick="openCampaignSummary('${cp.id}')">Summary</button></td></tr>`;
+      if (!cp.parsed) return `<tr><td><div class="driver-name">${esc(cp.name)}</div><div class="driver-sub">${esc(cp.segment || '')}</div></td><td colspan="8" style="color:var(--rose); font-size:12.5px;">${esc(cp.error)}</td><td style="white-space:nowrap;"><button class="filter-btn" onclick="openCampaignSummary('${cp.id}')">Summary</button> <button class="filter-btn" onclick="removeCampaign('${cp.id}')">Remove</button></td></tr>`;
       const st = campStatsFor(cp);
       return `<tr><td><div class="driver-name">${esc(cp.name)}</div><div class="driver-sub">${esc(cp.segment || '')}${cp.tab_name ? ', tab ' + esc(cp.tab_name) : ''}</div></td>
         <td class="hide-sm mono" style="font-size:12px;">${shortDate(istDateOf(cp.created_at))}</td>
         <td class="num">${st.callable}</td><td class="num">${st.fresh}</td><td class="num hide-sm">${st.tried}</td><td class="num hide-sm">${st.rnr}</td>
         <td class="num">${st.connected}</td><td class="num">${st.interested}</td><td class="num"><b>${st.converted}</b></td>
-        <td style="white-space:nowrap;"><button class="filter-btn" onclick="openCampaignSummary('${cp.id}')">Summary</button> <button class="filter-btn" onclick="showCampaignCalls('${cp.id}')">Calls</button></td></tr>`;
+        <td style="white-space:nowrap;"><button class="filter-btn" onclick="openCampaignSummary('${cp.id}')">Summary</button> <button class="filter-btn" onclick="showCampaignCalls('${cp.id}')">Calls</button> <button class="filter-btn" onclick="removeCampaign('${cp.id}')">Remove</button></td></tr>`;
     }).join('') + '</tbody></table></div></div><div class="note" style="margin-top:8px;">Leads = new numbers to call, after removing invalid numbers, duplicates and existing Kadam drivers. Converted = the number paid rent on or after the lead date.</div>';
 }
-function showCampaignCalls(id) { S.catFilter = { cat: 'camp', tier: null, campaign: id }; setView('queue'); renderQueue(); }
+// Removing adds a "Campaign removed" entry; the campaign and its open lead calls disappear.
+// Calls already made stay in Done and in each number's history, and a closed lead is not called
+// again if the same sheet is added back with the right tagging.
+async function removeCampaign(id) {
+  const cp = S.campaigns.find(c => c.id === id); if (!cp) return;
+  const st = cp.parsed ? campStatsFor(cp) : null;
+  const msg = `Remove ${cp.name}?\n\n` + (st ? `${st.fresh + st.tried + st.rnr + st.callback} open lead calls will be taken off the list. ` : '') +
+    'Calls already made stay in Done. You can add the sheet again afterwards with the right segment.';
+  if (!window.confirm(msg)) return;
+  const { error } = await sb.from(CALLS_TABLE).insert({ driver_name: cp.name, caller: CAMPAIGN_CALLER, call_status: CAMPAIGN_REMOVED, done: false,
+    item_keys: ['campaign-removed|' + cp.id], item_labels: ['Removed campaign: ' + cp.name], comment: JSON.stringify({ id: cp.id }) });
+  if (error) { window.alert('Not removed: ' + error.message); return; }
+  if (S.catFilter && S.catFilter.campaign === id) S.catFilter = null;
+  await loadLogs(); await loadCampaigns(); renderAll();
+}
+function showCampaignCalls(id) { S.queueMode = 'leads'; S.catFilter = { cat: 'camp', tier: null, campaign: id }; setView('queue'); renderQueue(); }
 function closeCModal() { S.cm = null; document.getElementById('cmodal').classList.remove('open'); document.body.style.overflow = ''; }
 function openCModal() { document.getElementById('cmodal').classList.add('open'); document.body.style.overflow = 'hidden'; }
 
+// Lists a sheet's tabs through the Google Sheets API. Needs SHEETS_API_KEY; without it only the
+// tab in the pasted link is read.
+async function listSheetTabs(sheetId) {
+  if (!SHEETS_API_KEY) return null;
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties(sheetId,title,index)&key=${encodeURIComponent(SHEETS_API_KEY)}`);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + res.status));
+  return (j.sheets || []).map(x => x.properties).sort((a, b) => a.index - b.index).map(p => ({ gid: String(p.sheetId), title: p.title }));
+}
 function openAddCampaign() {
-  S.cm = { mode: 'add', url: '', tab: '', segment: '', name: '', nameEdited: false, check: null, msg: '', busy: false };
+  S.cm = { mode: 'add', url: '', tabs: null, msg: '', busy: false };
   renderAddCampaign(); openCModal();
 }
-function cmSet(k, v) {
-  const m = S.cm; m[k] = v;
-  if (k === 'tab') { if (!m.segment || m.segmentAuto) { m.segment = /cargo/i.test(v) ? 'Cargo' : /auto|passenger/i.test(v) ? 'Passenger' : m.segment; m.segmentAuto = true; } }
-  if (k === 'segment') m.segmentAuto = false;
-  if (k === 'name') m.nameEdited = true;
-  if (k === 'url' || k === 'tab') m.check = null;
-  if (!m.nameEdited) m.name = m.tab ? campaignNameFor(m.tab, S.today, S.campaigns.map(c => c.name)) : '';
-  renderAddCampaign(k);
+function takenNames(exceptIdx) {
+  return S.campaigns.map(c => c.name).concat((S.cm.tabs || []).filter((t, i) => i !== exceptIdx && t.include).map(t => t.name));
+}
+function tabSet(i, k, v) {
+  const t = S.cm.tabs[i]; t[k] = v;
+  if (k === 'title' && !t.nameEdited) { t.segment = t.segment || detectSegment(v, t.parsed ? t.parsed.headers : []); t.name = v ? campaignNameFor(v, S.today, takenNames(i)) : ''; }
+  if (k === 'name') t.nameEdited = true;
+  S.cm.msg = '';
+  renderAddCampaign(k === 'title' || k === 'name' ? `${k}-${i}` : null);
+}
+async function findTabs() {
+  const m = S.cm; const ref = sheetRef(m.url);
+  if (!ref) { m.msg = 'That is not a Google Sheets link.'; m.msgCls = 'err'; return renderAddCampaign(); }
+  m.busy = true; m.msg = 'Reading the sheet…'; m.msgCls = ''; m.tabs = null; renderAddCampaign();
+  let list = null, listErr = null;
+  try { list = await listSheetTabs(ref.id); } catch (e) { listErr = e.message || String(e); }
+  const tabs = list || [{ gid: String(ref.gid), title: '' }];
+  m.ref = ref; m.listed = !!list; m.listErr = listErr;
+  m.tabs = await Promise.all(tabs.map(async tb => {
+    const t = { gid: tb.gid, title: tb.title, include: false, parsed: null, error: null, segment: null, name: '', nameEdited: false };
+    t.already = S.campaigns.find(c => c.sheet_id === ref.id && String(c.gid) === String(tb.gid)) || null;
+    try { t.parsed = parseCampaignSheet(await fetchSheetRows(ref.id, tb.gid), S.today); }
+    catch (e) { t.error = 'Could not read this tab (' + (e.message || e) + ').'; }
+    if (t.parsed && !t.parsed.headerFound) t.error = 'No phone column, skipped.';
+    t.segment = t.parsed ? detectSegment(t.title, t.parsed.headers) : null;
+    t.include = !!(t.parsed && t.parsed.headerFound && t.parsed.leads.length && !t.already);
+    return t;
+  }));
+  m.tabs.forEach((t, i) => { if (t.title) t.name = campaignNameFor(t.title, S.today, takenNames(i)); });
+  m.busy = false; m.msg = ''; renderAddCampaign();
 }
 function renderAddCampaign(focusKey) {
   const m = S.cm;
   document.getElementById('cTitle').textContent = 'Add campaign';
-  document.getElementById('cSub').textContent = 'One tab of a lead sheet per campaign';
-  const ck = m.check;
+  document.getElementById('cSub').textContent = 'Paste the lead sheet link. Each tab with leads becomes its own campaign.';
+  let tabsHtml = '';
+  if (m.tabs) {
+    const notShared = m.tabs.length && m.tabs.every(t => t.error && /not shared/.test(t.error));
+    tabsHtml = notShared ? `<div class="banner err" style="margin-top:12px;">The sheet is not shared. In the sheet, click Share and set General access to Anyone with the link: Viewer, then click Find tabs again.</div>` :
+      `${m.listed ? '' : `<div class="banner warn" style="margin-top:12px;">${m.listErr ? 'Could not list the tabs (' + esc(m.listErr) + '). ' : ''}Only the tab in your link was read${SHEETS_API_KEY ? '' : ' (finding every tab needs the Google API key set up)'}. Type its name below, or paste each tab's link separately.</div>`}
+      <div class="tbl-wrap" style="margin-top:12px;"><div class="tbl-scroll"><table><thead><tr><th></th><th>Tab</th><th class="num">Rows</th><th class="num">Valid</th><th class="num">Invalid</th><th class="num">Repeated</th><th>Segment</th><th>Campaign name</th></tr></thead><tbody>
+      ${m.tabs.map((t, i) => {
+        const p = t.parsed, usable = p && p.headerFound && p.leads.length && !t.already;
+        const title = m.listed ? `<div class="driver-name">${esc(t.title)}</div>` : `<input type="text" id="title-${i}" value="${esc(t.title)}" placeholder="Tab name, e.g. Cargo Leads" oninput="tabSet(${i}, 'title', this.value)" style="width:170px; border:1.5px solid #c7cac4; border-radius:8px; padding:6px 8px;">`;
+        const note = t.already ? `<div class="driver-sub">already added as ${esc(t.already.name)}</div>` : t.error ? `<div class="driver-sub" style="color:var(--rose);">${esc(t.error)}</div>` : (p && !p.leads.length ? '<div class="driver-sub">no valid numbers</div>' : '');
+        return `<tr${usable ? '' : ' style="opacity:0.6;"'}>
+          <td><input type="checkbox" ${t.include ? 'checked' : ''} ${usable ? '' : 'disabled'} onchange="S.cm.tabs[${i}].include=this.checked; renderAddCampaign();" aria-label="Add this tab"></td>
+          <td>${title}${note}</td>
+          <td class="num">${p ? p.dataRows : '-'}</td><td class="num">${p ? p.leads.length : '-'}</td><td class="num">${p ? p.invalid.length : '-'}</td><td class="num">${p ? p.dupWithin.length : '-'}</td>
+          <td>${usable ? `<select onchange="tabSet(${i}, 'segment', this.value)" style="border:1.5px solid ${t.include && !t.segment ? 'var(--rose)' : '#c7cac4'}; border-radius:8px; padding:6px 8px;"><option value="">${t.segment ? 'Choose' : 'Not sure, pick one'}</option>${['Passenger', 'Cargo'].map(x => `<option ${t.segment === x ? 'selected' : ''}>${x}</option>`).join('')}</select>` : '-'}</td>
+          <td>${usable ? `<input type="text" id="name-${i}" value="${esc(t.name)}" oninput="tabSet(${i}, 'name', this.value)" style="width:140px; border:1.5px solid #c7cac4; border-radius:8px; padding:6px 8px;">` : '-'}</td></tr>`;
+      }).join('')}</tbody></table></div></div>
+      ${m.tabs.some(t => t.include && !t.segment) ? '<div class="note" style="margin-top:8px; color:var(--rose);">Could not tell if a tab is cargo or passenger from its name and questions. Pick the segment for the tabs marked in red.</div>' : ''}`;
+  }
+  const n = (m.tabs || []).filter(t => t.include).length;
   document.getElementById('cBody').innerHTML = `
     <div class="form-grid">
-      <div class="field full"><label for="cUrl">Sheet link</label><input type="url" id="cUrl" value="${esc(m.url)}" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=..." oninput="cmSet('url', this.value)">
-        <div class="hint">Open the tab with the leads, then copy the link from the address bar (it ends in gid=...). The sheet must be shared as Anyone with the link: Viewer.</div></div>
-      <div class="field"><label for="cTab">Tab name</label><input type="text" id="cTab" value="${esc(m.tab)}" placeholder="e.g. Cargo Leads" oninput="cmSet('tab', this.value)"></div>
-      <div class="field"><label for="cSeg">Segment</label><select id="cSeg" onchange="cmSet('segment', this.value)"><option value="">Choose</option>${['Passenger', 'Cargo'].map(x => `<option ${m.segment === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
-      <div class="field full"><label for="cName">Campaign name</label><input type="text" id="cName" value="${esc(m.name)}" oninput="cmSet('name', this.value)">
-        <div class="hint">Tab name + month + year, e.g. cargoOct26. You can change it.</div></div>
+      <div class="field full"><label for="cUrl">Sheet link</label><input type="url" id="cUrl" value="${esc(m.url)}" placeholder="https://docs.google.com/spreadsheets/d/..." oninput="S.cm.url=this.value">
+        <div class="hint">The sheet must be shared as Anyone with the link: Viewer. Campaign names are tab name + month + year, e.g. cargoOct26; you can change them.</div></div>
     </div>
-    ${ck ? (ck.error ? `<div class="banner err" style="margin-top:12px;">${esc(ck.error)}</div>` : `<div class="banner ${ck.parsed.leads.length ? 'warn' : 'err'}" style="margin-top:12px;">Sheet read: ${ck.parsed.dataRows} rows, ${ck.parsed.leads.length} unique valid numbers, ${ck.parsed.invalid.length} invalid, ${ck.parsed.dupWithin.length} repeated in the sheet.${ck.parsed.leads.length ? '' : ' No usable leads found: check this is the right tab and it has a phone column.'}</div>`) : ''}
+    ${tabsHtml}
     <div class="form-actions">
-      <button class="ghost" onclick="checkCampaign()" ${m.busy ? 'disabled' : ''}>Check sheet</button>
-      <button class="primary" onclick="saveCampaign()" ${m.busy || !(ck && !ck.error && ck.parsed.leads.length) ? 'disabled' : ''}>Add campaign</button>
+      <button class="ghost" onclick="findTabs()" ${m.busy ? 'disabled' : ''}>Find tabs</button>
+      ${m.tabs ? `<button class="primary" onclick="saveCampaigns()" ${m.busy || !n ? 'disabled' : ''}>Add ${n} campaign${n === 1 ? '' : 's'}</button>` : ''}
       <span class="status-msg ${m.msgCls || ''}">${esc(m.msg || '')}</span>
     </div>`;
-  if (focusKey) { const el = document.getElementById({ url: 'cUrl', tab: 'cTab', name: 'cName' }[focusKey]); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
+  if (focusKey) { const el = document.getElementById(focusKey); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
 }
-async function checkCampaign() {
-  const m = S.cm; const ref = sheetRef(m.url);
-  if (!ref) { m.check = { error: 'That is not a Google Sheets link.' }; return renderAddCampaign(); }
-  m.busy = true; m.msg = 'Reading the sheet…'; m.msgCls = ''; renderAddCampaign();
-  try { m.check = { ref, parsed: parseCampaignSheet(await fetchSheetRows(ref.id, ref.gid), S.today) }; m.msg = ''; }
-  catch (e) { m.check = { error: 'Could not read the sheet (' + (e.message || e) + '). In the sheet, click Share and set General access to Anyone with the link: Viewer, then try again.' }; m.msg = ''; }
-  m.busy = false; renderAddCampaign();
-}
-async function saveCampaign() {
-  const m = S.cm;
-  if (!m.tab.trim()) { m.msg = 'Enter the tab name.'; m.msgCls = 'err'; return renderAddCampaign(); }
-  if (!m.segment) { m.msg = 'Choose the segment.'; m.msgCls = 'err'; return renderAddCampaign(); }
-  if (!m.name.trim()) { m.msg = 'Enter a campaign name.'; m.msgCls = 'err'; return renderAddCampaign(); }
-  if (S.campaigns.some(c => c.name.toLowerCase() === m.name.trim().toLowerCase())) { m.msg = 'A campaign with this name already exists.'; m.msgCls = 'err'; return renderAddCampaign(); }
-  if (S.campaigns.some(c => c.sheet_id === m.check.ref.id && String(c.gid) === String(m.check.ref.gid))) { m.msg = 'This tab is already a campaign.'; m.msgCls = 'err'; return renderAddCampaign(); }
+async function saveCampaigns() {
+  const m = S.cm; const tabs = m.tabs.filter(t => t.include);
+  const fail = msg => { m.msg = msg; m.msgCls = 'err'; renderAddCampaign(); };
+  for (const t of tabs) {
+    if (!t.title.trim()) return fail('Type the tab name for each tab you are adding.');
+    if (!t.segment) return fail(`Pick Cargo or Passenger for ${t.title || 'each tab'}.`);
+    if (!t.name.trim()) return fail(`Enter a campaign name for ${t.title}.`);
+  }
+  const names = tabs.map(t => t.name.trim().toLowerCase());
+  if (new Set(names).size !== names.length) return fail('Two tabs have the same campaign name.');
+  const clash = tabs.find(t => S.campaigns.some(c => c.name.toLowerCase() === t.name.trim().toLowerCase()));
+  if (clash) return fail(`A campaign called ${clash.name} already exists.`);
   m.busy = true; m.msg = 'Saving…'; m.msgCls = ''; renderAddCampaign();
-  const name = m.name.trim();
-  const { error } = await sb.from(CALLS_TABLE).insert({ driver_name: name, caller: CAMPAIGN_CALLER, call_status: CAMPAIGN_MARK, done: false,
-    item_keys: ['campaign|' + name], item_labels: ['Campaign: ' + name],
-    comment: JSON.stringify({ sheet_url: m.url.trim(), sheet_id: m.check.ref.id, gid: String(m.check.ref.gid), tab_name: m.tab.trim(), segment: m.segment }) });
-  if (error) { m.busy = false; m.msg = 'Not saved: ' + error.message; m.msgCls = 'err'; return renderAddCampaign(); }
+  const added = [];
+  for (const t of tabs) {
+    const name = t.name.trim();
+    const { error } = await sb.from(CALLS_TABLE).insert({ driver_name: name, caller: CAMPAIGN_CALLER, call_status: CAMPAIGN_MARK, done: false,
+      item_keys: ['campaign|' + name], item_labels: ['Campaign: ' + name],
+      comment: JSON.stringify({ sheet_url: `https://docs.google.com/spreadsheets/d/${m.ref.id}/edit#gid=${t.gid}`, sheet_id: m.ref.id, gid: String(t.gid), tab_name: t.title.trim(), segment: t.segment }) });
+    if (error) { m.busy = false; return fail(`Saved ${added.length} of ${tabs.length}. ${name} not saved: ${error.message}`); }
+    added.push(name);
+  }
   await loadLogs();
   await loadCampaigns();
   renderAll();
-  const saved = S.campaigns.find(c => c.name === name);
-  if (saved) openCampaignSummary(saved.id); else closeCModal();
+  const ids = S.campaigns.filter(c => added.includes(c.name)).map(c => c.id);
+  if (ids.length) { S.cm = { mode: 'summary', ids }; renderCampaignSummary(); } else closeCModal();
 }
-function openCampaignSummary(id) { S.cm = { mode: 'summary', id }; renderCampaignSummary(); openCModal(); }
-function renderCampaignSummary() {
-  const cp = S.campaigns.find(c => c.id === S.cm.id);
-  if (!cp) return closeCModal();
-  document.getElementById('cTitle').textContent = cp.name;
-  document.getElementById('cSub').textContent = `${cp.segment || ''} campaign, added ${shortDate(istDateOf(cp.created_at))}${cp.tab_name ? ', tab ' + cp.tab_name : ''}`;
-  if (!cp.parsed) { document.getElementById('cBody').innerHTML = `<div class="banner err">${esc(cp.error)}</div>`; return; }
+function openCampaignSummary(id) { S.cm = { mode: 'summary', ids: [id] }; renderCampaignSummary(); openCModal(); }
+function campaignSummaryHtml(cp) {
+  if (!cp.parsed) return `<div class="banner err">${esc(cp.error)}</div>`;
   const st = campStatsFor(cp), p = cp.parsed;
   const cell = (k, v, cls) => `<div><div class="k">${esc(k)}</div><div class="v ${cls || ''}">${v}</div></div>`;
   const list = (title, arr, fmt) => arr.length ? `<details class="howto" style="margin:-6px 0 12px;"><summary>${esc(title)} (${arr.length})</summary><ol>${arr.map(x => `<li>${fmt(x)}</li>`).join('')}</ol></details>` : '';
   const outs = Object.entries(st.outcomes).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-  document.getElementById('cBody').innerHTML = `
+  return `
     <div class="sub-h" style="margin-top:0;">List check</div>
     <div class="stat-grid">
       ${cell('Rows in sheet', st.rows)}${cell('Invalid numbers', st.invalid, st.invalid ? 'warn' : '')}${cell('Repeated in this sheet', st.dupWithin, st.dupWithin ? 'warn' : '')}${cell('Already in earlier lists', st.dupPrevious, st.dupPrevious ? 'warn' : '')}
@@ -1699,8 +1803,22 @@ function renderCampaignSummary() {
       ${cell('Connected', st.connected)}${cell('Interested', st.interested, 'ok')}${cell('Converted (paid rent)', st.converted, 'ok')}${cell('Connect rate', st.callable ? Math.round((st.connected / st.callable) * 100) + '%' : '-')}
     </div>
     ${outs.length ? `<div class="sub-h">What leads said</div><div class="tbl-wrap"><table class="hist"><tbody>${outs.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v}</td></tr>`).join('')}</tbody></table></div>` : ''}
-    <div class="form-actions"><button class="primary" onclick="closeCModal(); showCampaignCalls('${cp.id}')">Show calls for this campaign</button>
+    <div class="form-actions"><button class="primary" onclick="closeCModal(); showCampaignCalls('${cp.id}')">Show calls for ${esc(cp.name)}</button>
       <a class="filter-btn" style="text-decoration:none;" href="${esc(cp.sheet_url)}" target="_blank" rel="noopener">Open sheet</a></div>`;
+}
+function renderCampaignSummary() {
+  const cps = (S.cm.ids || []).map(id => S.campaigns.find(c => c.id === id)).filter(Boolean);
+  if (!cps.length) return closeCModal();
+  const sub = cp => `${cp.segment || ''} campaign, added ${shortDate(istDateOf(cp.created_at))}${cp.tab_name ? ', tab ' + cp.tab_name : ''}`;
+  if (cps.length === 1) {
+    document.getElementById('cTitle').textContent = cps[0].name;
+    document.getElementById('cSub').textContent = sub(cps[0]);
+    document.getElementById('cBody').innerHTML = campaignSummaryHtml(cps[0]);
+  } else {
+    document.getElementById('cTitle').textContent = `${cps.length} campaigns added`;
+    document.getElementById('cSub').textContent = cps.map(c => c.name).join(', ');
+    document.getElementById('cBody').innerHTML = cps.map((cp, i) => `<div style="${i ? 'border-top:2px solid var(--ink); margin-top:20px; padding-top:14px;' : ''}"><h3 style="font-size:20px;">${esc(cp.name)}</h3><div class="modal-sub" style="margin-bottom:12px;">${esc(sub(cp))}</div>${campaignSummaryHtml(cp)}</div>`).join('');
+  }
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.cm) closeCModal(); });
 
