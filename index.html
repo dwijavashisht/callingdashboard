@@ -211,7 +211,8 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
 </div>
 
 <div class="view-nav">
-  <button class="view-nav-btn active" id="navLeads" onclick="setQueueMode('leads')">To call - new leads <span class="cnt" id="cntLeads">0</span></button>
+  <button class="view-nav-btn active" id="navLeads" onclick="setQueueMode('leads')">To call - fresh leads <span class="cnt" id="cntLeads">0</span></button>
+  <button class="view-nav-btn" id="navInterested" onclick="setView('interested')">To call - interested leads <span class="cnt" id="cntInterested">0</span></button>
   <button class="view-nav-btn" id="navDrivers" onclick="setQueueMode('drivers')">To call - existing drivers <span class="cnt" id="cntDrivers">0</span></button>
   <button class="view-nav-btn" id="navRnr" onclick="setView('rnr')">RNR <span class="cnt" id="cntRnr">0</span></button>
   <button class="view-nav-btn" id="navCampaigns" onclick="setView('campaigns')">Campaigns <span class="cnt" id="cntCampaigns">0</span></button>
@@ -250,6 +251,21 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
       <div class="filters"><input class="search" id="doneSearch" placeholder="Search name, ID or phone" oninput="renderDone()"><span id="doneFilters" class="filters"></span></div>
     </div>
     <div class="tbl-wrap"><div class="tbl-scroll" id="doneTable"></div></div>
+  </div>
+</div>
+
+<div id="viewInterested" style="display:none;">
+  <div class="section">
+    <div class="section-head"><h2>Interested leads</h2><span class="note">click a box to filter the list</span></div>
+    <div class="kpis" id="intKpis" style="grid-template-columns:repeat(5,1fr);"></div>
+  </div>
+  <div class="section">
+    <div class="section-head">
+      <h2 id="intTitle">Follow-ups</h2>
+      <div class="filters"><span class="filters" id="intOwners"></span><input class="search" id="intSearch" placeholder="Search name or phone" oninput="renderInterested()"></div>
+    </div>
+    <div class="tbl-wrap"><div class="tbl-scroll" id="intTable"></div></div>
+    <div class="note" style="margin-top:8px;">Leads marked interested stay here until they pay rent (counted as converted) or a follow-up closes them. With a visit or call-back date they come up that day; without one, every 2nd day after the last call.</div>
   </div>
 </div>
 
@@ -338,11 +354,16 @@ const REASONS = ['Vehicle issue', 'Charging issue', 'Low earnings', 'Health', 'F
 const CALLERS = ['Jyoti', 'Nandani'];   // Swati left in Oct 2026; her past calls stay in history
 const RNR_DAYS = 10, RNR_MIN_TRIES = 7; // unanswered for 10+ days with 7+ tries -> RNR tab
 const CAMP_OUTCOMES = ['Interested, coming to hub', 'Interested, call back later', 'Interested in cargo', 'Interested in passenger',
-  'Not interested', 'Not eligible', 'Already driving with another fleet', 'Not in Delhi NCR'];
+  'Not interested', 'Not eligible', 'Already driving with another fleet', 'Not in Delhi NCR', 'Already working in Kadam'];
 const INCOMING_SOURCES = ['Auto branding', 'Instagram', 'Facebook', 'WhatsApp', 'Referral', 'Walk-in', 'Other'];
 const CAMP_SNOOZE_OUTCOME = 'Interested, call back later';      // stays open, returns on the call-back date
+// Interested leads stay open in the interested tab until they pay rent or a follow-up closes them.
+const FOLLOWUP_OUTCOMES = ['Visited, joining', 'Visited, not joining', "Didn't come, new date", "Didn't come, not interested", 'Still interested', 'Already working in Kadam'];
+const FOLLOWUP_KEEP = ['Visited, joining', "Didn't come, new date", 'Still interested'];   // these keep the lead in the interested tab
+const FOLLOWUP_EVERY_DAYS = 2;
+function isInterestedOutcome(o) { return /^interested/i.test(o || '') || FOLLOWUP_KEEP.includes(o); }
 const CAMP_DATE_OUTCOMES = ['Interested, coming to hub', 'Interested, call back later'];
-const LEAD_OUTCOMES = ['Interested in Passenger', 'Interested in Cargo', 'Not Interested'];
+const LEAD_OUTCOMES = ['Interested in Passenger', 'Interested in Cargo', 'Not Interested', 'Already working in Kadam'];
 const SERVICE_OUTCOMES = ['Happy with service', 'Took too long', 'New problem after service', 'Other'];
 // Passenger vehicles, copied from the passenger dashboard's MASTER_VEHICLE_LIST (138 vehicles).
 // Update both together when vehicles are added or removed.
@@ -836,8 +857,11 @@ function buildQueue(ctx) {
   const byItem = logsByItem(ctx.logs);
   // a campaign lead number already closed in any campaign (e.g. one later removed and re-added) stays closed
   const doneLeadPhones = new Set();
-  (ctx.logs || []).forEach(l => { if (l.done) (l.item_keys || []).forEach(k => { if (/^(camp|inc|lead)\|ph:/.test(k)) doneLeadPhones.add(k.split('|')[1]); }); });
-  const open = items.filter(it => !(byItem[it.key] || []).some(l => l.done) && !(['camp', 'inc', 'lead'].includes(it.cat) && doneLeadPhones.has('ph:' + it.phone)));
+  // For leads, an interested outcome never closes the call, even if it was saved as done before the
+  // interested tab existed, so those leads show up there too.
+  const closes = (l, cat) => l.done && !(['camp', 'inc', 'lead'].includes(cat) && isInterestedOutcome(l.outcome));
+  (ctx.logs || []).forEach(l => (l.item_keys || []).forEach(k => { const cat = k.split('|')[0]; if (/^(camp|inc|lead)\|ph:/.test(k) && closes(l, cat)) doneLeadPhones.add(k.split('|')[1]); }));
+  const open = items.filter(it => !(byItem[it.key] || []).some(l => closes(l, it.cat)) && !(['camp', 'inc', 'lead'].includes(it.cat) && doneLeadPhones.has('ph:' + it.phone)));
   const rows = {};
   open.forEach(it => {
     const rk = ['lead', 'camp', 'inc'].includes(it.cat) ? `lead:${it.phone}` : it.cat === 'svc' ? `svc:${it.driverId || 'veh'}:${it.vehicle}:${it.anchor}:${it.tier}`
@@ -863,37 +887,61 @@ function buildQueue(ctx) {
   assignOwners(list, ctx.logs);
   list.forEach(r => {
     Object.assign(r, rnrInfo(r.items.map(i => itemPrefix(i.key)), ctx.logs, ctx.today));
-    const last = r.attempts[r.attempts.length - 1];
-    r.snoozedUntil = last && last.outcome === CAMP_SNOOZE_OUTCOME && last.comeback_date && last.comeback_date > ctx.today ? last.comeback_date : null;
+    if (['lead', 'camp', 'inc'].includes(r.items[0].cat)) Object.assign(r, interestedState(r, ctx.today));
   });
-  return { rows: list.filter(r => !r.rnr && !r.snoozedUntil), rnr: list.filter(r => r.rnr && !r.snoozedUntil),
-    snoozed: list.filter(r => r.snoozedUntil), all: list, items, byItem };
+  const interested = list.filter(r => r.interested && !r.rnr);
+  const rank = { 'visit-today': 0, 'visit-missed': 1, 'callback-today': 2, 'callback-missed': 3, 'followup-due': 4, scheduled: 9 };
+  interested.sort((a, b) => (rank[a.dueState] - rank[b.dueState]) || String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
+  return { rows: list.filter(r => !r.rnr && !r.interested), rnr: list.filter(r => r.rnr), interested,
+    snoozed: [], all: list, items, byItem };
 }
 
 // ---------- who calls whom ----------
-// Each person belongs to the current caller who called them first (any call type, matched by Kadam
+// Each person belongs to the current caller who called them last (any call type, matched by Kadam
 // ID or phone, so a lead who becomes a driver stays with the same caller). Never called, or only
 // called by someone who has left: split by phone number, fixed so it never moves.
 function hashPick(key) { let h = 5381; const s = String(key || ''); for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return CALLERS[h % CALLERS.length]; }
+// The latest call by a current caller decides (index keeps the most recent per ID and per phone)
 function firstCallerIndex(logs) {
   const byId = {}, byPhone = {};
   (logs || []).slice().sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)).forEach(l => {
     if (!CALLERS.includes(l.caller)) return;
-    if (l.driver_id && !byId[l.driver_id]) byId[l.driver_id] = l;
+    if (l.driver_id) byId[l.driver_id] = l;
     const phones = new Set(); const p0 = phone10(l.phone); if (p0) phones.add(p0);
     (l.item_keys || []).forEach(k => { const m = k.match(/\|ph:(\d{10})\|/); if (m) phones.add(m[1]); });
-    phones.forEach(p => { if (!byPhone[p]) byPhone[p] = l; });
+    phones.forEach(p => { byPhone[p] = l; });
   });
   return { byId, byPhone };
 }
 function ownerFor(r, idx) {
   const ph = phone10(r.phone);
   const cands = [r.driverId && idx.byId[r.driverId], ph && idx.byPhone[ph]].filter(Boolean)
-    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
-  if (cands.length) return { owner: cands[0].caller, ownerHow: 'first call' };
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  if (cands.length) return { owner: cands[0].caller, ownerHow: 'last call' };
   return { owner: hashPick(ph || r.driverId || r.rowKey), ownerHow: 'auto' };
 }
 function assignOwners(rows, logs) { const idx = firstCallerIndex(logs); rows.forEach(r => Object.assign(r, ownerFor(r, idx))); return rows; }
+
+// Where an interested lead stands. Visit (or call-back) date: due that day, missed if it passed with
+// no call since. No date: due every FOLLOWUP_EVERY_DAYS days after the last call.
+function interestedState(r, today) {
+  const conn = r.attempts.filter(l => l.call_status === 'Connected');
+  const lastConn = conn[conn.length - 1];
+  if (!lastConn || !isInterestedOutcome(lastConn.outcome)) return { interested: false };
+  const last = r.attempts[r.attempts.length - 1];
+  const lastDate = istDateOf(last.created_at);
+  const date = lastConn.comeback_date || null;
+  const kind = lastConn.outcome === CAMP_SNOOZE_OUTCOME ? 'callback' : 'visit';
+  const firstInterest = conn.filter(l => /^interested/i.test(l.outcome || '')).pop();
+  const base = { interested: true, interestOutcome: lastConn.outcome, interestType: firstInterest ? firstInterest.outcome : lastConn.outcome, visitDate: kind === 'visit' ? date : null, callbackDate: kind === 'callback' ? date : null };
+  if (date && lastDate < date) {
+    if (date > today) return { ...base, dueState: 'scheduled', dueDate: date };
+    if (date === today) return { ...base, dueState: kind + '-today', dueDate: date };
+    return { ...base, dueState: kind + '-missed', dueDate: date };
+  }
+  const next = addDays(lastDate, FOLLOWUP_EVERY_DAYS);
+  return { ...base, dueState: next <= today ? 'followup-due' : 'scheduled', dueDate: next };
+}
 
 // The same call across steps: cat|who|anchor (rent lapse, joiner, lead, exit, service)
 function itemPrefix(key) { return key.split('|').slice(0, 3).join('|'); }
@@ -915,7 +963,7 @@ function campaignStats(cp, ctx, q) {
   const p = cp.parsed || { dataRows: 0, leads: [], invalid: [], dupWithin: [] };
   const s = { rows: p.dataRows, valid: p.leads.length + p.dupWithin.length, invalid: p.invalid.length, dupWithin: p.dupWithin.length,
     unique: p.leads.length, dupPrevious: 0, dupPreviousList: [], existing: 0, existingList: [], callable: 0,
-    fresh: 0, tried: 0, rnr: 0, callback: 0, connected: 0, interested: 0, converted: 0, outcomes: {} };
+    fresh: 0, tried: 0, rnr: 0, callback: 0, inInterested: 0, connected: 0, interested: 0, converted: 0, outcomes: {} };
   CAMP_OUTCOMES.forEach(o => { s.outcomes[o] = 0; });
   const rowByKey = {}; if (q) (q.all || []).forEach(r => r.items.forEach(i => { rowByKey[i.key] = r; }));
   const byItem = logsByItem(ctx.logs);
@@ -938,7 +986,7 @@ function campaignStats(cp, ctx, q) {
       const o = conn[conn.length - 1].outcome;
       if (o) s.outcomes[o] = (s.outcomes[o] || 0) + 1;
       if (/^Interested/.test(o || '')) s.interested++;
-      const r = rowByKey[key]; if (r && r.snoozedUntil) s.callback++;
+      const r = rowByKey[key]; if (r && r.interested) s.inInterested++;
     } else if (!logs.length) s.fresh++;
     else { const r = rowByKey[key]; if (r && r.rnr) s.rnr++; else s.tried++; }
   });
@@ -980,7 +1028,7 @@ function daySummary(ctx, date) {
   out.driverOutcomes = tally(conn.filter(l => !isLead(l) && logCat(l).cat !== 'svc').map(l => l.outcome));
   out.reasons = tally(conn.filter(l => !isLead(l)).map(l => l.reason));
   out.serviceOutcomes = tally(conn.filter(l => logCat(l).cat === 'svc').map(l => l.outcome));
-  out.hubVisits = conn.filter(l => isLead(l) && l.outcome === 'Interested, coming to hub');
+  out.hubVisits = conn.filter(l => isLead(l) && l.comeback_date && l.outcome !== CAMP_SNOOZE_OUTCOME && (isInterestedOutcome(l.outcome) || l.outcome === 'Interested, coming to hub'));
   out.callbacks = conn.filter(l => l.outcome === CAMP_SNOOZE_OUTCOME);
   // Drivers called about rent before who paid on this day, first payment after their latest rent call
   const lastRentCall = {};
@@ -1195,7 +1243,7 @@ function leavesFor(driverId, name, ctx) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
-  hashPick, ownerFor, assignOwners, firstCallerIndex, INCOMING_SOURCES, summaryDefaultDay, daySummary, logCat, istTime, detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
+  hashPick, ownerFor, assignOwners, firstCallerIndex, INCOMING_SOURCES, summaryDefaultDay, daySummary, logCat, istTime, detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, FOLLOWUP_OUTCOMES, FOLLOWUP_KEEP, isInterestedOutcome, interestedState, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
   buildLeadIndex, campaignStats, rnrInfo, itemPrefix, existingDriver,
   LEAD_OUTCOMES, parseLeadForm, buildPhoneRent, leadOnboarded, phone10,
   SERVICE_OUTCOMES, MASTER_VEHICLES, parseServiceTracker, sheetDay, normReg, driversOnVehicle,
@@ -1392,6 +1440,7 @@ function renderAll() {
   renderHubFilters();
   renderBanners();
   renderQueue();
+  renderInterested();
   renderRnr();
   renderCampaigns();
   renderDone();
@@ -1424,7 +1473,7 @@ function isLeadRow(r) { return LEAD_CATS.includes(r.items[0].cat); }
 function isLeadLog(l) { return (l.item_keys || []).some(k => /^(lead|camp|inc)\|/.test(k)); }
 function setView(v) {
   S.view = v;
-  ['queue', 'rnr', 'campaigns', 'done', 'daily', 'impact'].forEach(x => {
+  ['queue', 'interested', 'rnr', 'campaigns', 'done', 'daily', 'impact'].forEach(x => {
     document.getElementById('view' + x[0].toUpperCase() + x.slice(1)).style.display = x === v ? '' : 'none';
     if (x !== 'queue') document.getElementById('nav' + x[0].toUpperCase() + x.slice(1)).classList.toggle('active', x === v);
   });
@@ -1472,7 +1521,7 @@ function rowSub(r) {
 }
 function ownerTag(r) {
   const i = CALLERS.indexOf(r.owner);
-  return `<span class="owner owner-${i < 0 ? 0 : i}" title="${r.ownerHow === 'first call' ? esc(r.owner) + ' called them first, so all their calls go to her' : 'Not called yet, given to ' + esc(r.owner) + ' by phone number'}">${esc(r.owner || '-')}</span>`;
+  return `<span class="owner owner-${i < 0 ? 0 : i}" title="${r.ownerHow === 'last call' ? esc(r.owner) + ' made the latest call, so their calls go to her' : 'Not called yet, given to ' + esc(r.owner) + ' by phone number'}">${esc(r.owner || '-')}</span>`;
 }
 function ownerOk(r) { return !S.ownerFilter || r.owner === S.ownerFilter; }
 function ownerChips(rows, rerender) {
@@ -1497,6 +1546,40 @@ function rowsTableHtml(rows, mode) {
         <td class="hide-sm" style="font-size:12px;">${last ? `${esc(last.call_status)}<div class="driver-sub">${esc(last.caller)}, ${callTime(last.created_at)}</div>` : '<span class="driver-sub">not called</span>'}</td>
         <td><button class="call-now" onclick="openRow('${esc(r.rowKey)}', '${mode}')">Call now</button></td>
       </tr>`;
+    }).join('') + '</tbody></table>';
+}
+const DUE_LABEL = { 'visit-today': ['Visit today', 'b-bad'], 'visit-missed': ['Visit missed', 'b-bad'], 'callback-today': ['Call back today', 'b-rent3'],
+  'callback-missed': ['Call-back missed', 'b-rent3'], 'followup-due': ['Follow-up due', 'b-join'], scheduled: ['Scheduled', 'b-wait'] };
+const DUE_GROUPS = [['visit-today', 'Visit today', 'c-rose'], ['visit-missed', 'Visit missed', 'c-deep'], ['callback', 'Call-backs due', 'c-amber'], ['followup-due', 'Follow-up due', 'c-blue'], ['scheduled', 'Scheduled', 'c-teal']];
+function inDueGroup(r, g) { return g === 'callback' ? /^callback-/.test(r.dueState) : r.dueState === g; }
+function interestedRows() { return (S.Q || buildQueue(ctx())).interested.filter(r => hubOk(r.hub)); }
+function renderInterested() {
+  let rows = interestedRows();
+  document.getElementById('cntInterested').textContent = rows.filter(r => r.dueState !== 'scheduled').length;
+  document.getElementById('intKpis').innerHTML = DUE_GROUPS.map(([g, label, cls]) => {
+    const on = S.intFilter === g;
+    return `<button class="kpi ${cls} ${on ? 'active-filter' : ''}" onclick="S.intFilter=${on ? 'null' : `'${g}'`}; renderInterested();"><div class="label">${label}</div><div class="value">${rows.filter(r => inDueGroup(r, g)).length}</div></button>`;
+  }).join('');
+  if (S.intFilter) rows = rows.filter(r => inDueGroup(r, S.intFilter));
+  document.getElementById('intOwners').innerHTML = ownerChips(rows, 'renderInterested();');
+  rows = rows.filter(ownerOk);
+  const qv = (document.getElementById('intSearch').value || '').trim().toLowerCase();
+  if (qv) rows = rows.filter(r => [r.name, r.phone].some(x => String(x || '').toLowerCase().includes(qv)));
+  S.interestedOrder = rows.map(r => r.rowKey);
+  const el = document.getElementById('intTable');
+  if (!rows.length) { el.innerHTML = '<div class="empty">No interested leads here.</div>'; return; }
+  el.innerHTML = `<table><thead><tr><th>Lead</th><th>Caller</th><th>Phone</th><th>Interested</th><th>Status</th><th>Date</th><th class="hide-sm">Last call</th><th></th></tr></thead><tbody>` +
+    rows.map(r => {
+      const last = r.lastAttempt; const [lab, cls] = DUE_LABEL[r.dueState] || ['', 'b-wait'];
+      return `<tr class="queue-row${r.dueState === 'scheduled' ? ' tried' : ''}">
+        <td><div class="driver-name">${esc(r.name)}</div><div class="driver-sub">${rowSub(r)}</div></td>
+        <td>${ownerTag(r)}</td>
+        <td class="mono" style="font-size:12px;">${esc(r.phone || '-')}</td>
+        <td style="font-size:12.5px;">${esc(r.interestType)}${r.interestOutcome !== r.interestType ? `<div class="driver-sub">latest: ${esc(r.interestOutcome)}</div>` : ''}</td>
+        <td><span class="badge ${cls}">${lab}</span></td>
+        <td class="mono" style="font-size:12px;">${r.visitDate ? 'visit ' + shortDate(r.visitDate) : r.callbackDate ? 'call ' + shortDate(r.callbackDate) : 'next ' + shortDate(r.dueDate)}</td>
+        <td class="hide-sm" style="font-size:12px; max-width:260px;">${last ? `${esc(last.call_status)}${last.outcome ? ', ' + esc(last.outcome) : ''}<div class="driver-sub">${esc(last.caller)}, ${callTime(last.created_at)}${last.comment ? ': ' + esc(last.comment) : ''}</div>` : ''}</td>
+        <td><button class="call-now" onclick="openRow('${esc(r.rowKey)}', 'interested')">Call now</button></td></tr>`;
     }).join('') + '</tbody></table>';
 }
 function renderRnr() {
@@ -1589,7 +1672,7 @@ function renderQueueTable() {
   if (qv) rows = rows.filter(r => [r.name, r.driverId, r.phone].some(x => String(x || '').toLowerCase().includes(qv)));
   document.getElementById('queueTitle').innerHTML = S.catFilter
     ? `Call list: ${esc(S.catFilter.campaign ? campaignNameById(S.catFilter.campaign) : itemLabel(S.catFilter))} <button class="filter-btn" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="S.catFilter=null; renderQueue();">Show all</button>`
-    : (S.queueMode === 'leads' ? 'New leads to call' : 'Existing drivers to call');
+    : (S.queueMode === 'leads' ? 'Fresh leads to call' : 'Existing drivers to call');
   S.queueOrder = rows.map(r => r.rowKey);
   const el = document.getElementById('queueTable');
   if (!rows.length) {
@@ -1601,7 +1684,7 @@ function renderQueueTable() {
 
 // ---------- call sheet ----------
 function openRow(rowKey, list) {
-  S.lastOrder = list === 'rnr' ? (S.rnrOrder || []) : (S.queueOrder || []); S.lastList = list || 'queue';
+  S.lastOrder = list === 'rnr' ? (S.rnrOrder || []) : list === 'interested' ? (S.interestedOrder || []) : (S.queueOrder || []); S.lastList = list || 'queue';
   const savedCaller = lsGet('portalCaller');
   const rowNow = ((S.Q || buildQueue(ctx())).all || []).find(r => r.rowKey === rowKey);
   S.current = { rowKey, form: { caller: rowNow && CALLERS.includes(rowNow.owner) ? rowNow.owner : (CALLERS.includes(savedCaller) ? savedCaller : ''), status: '', outcome: '', reason: '', comeback: '', comment: '', }, msg: '' };
@@ -1734,13 +1817,13 @@ function renderModal() {
       <div class="field"><label>Called by</label><div class="seg">${CALLERS.map(c => `<button type="button" class="${f.caller === c ? 'on' : ''}" onclick="setForm('caller','${c}')">${c}</button>`).join('')}</div></div>
       <div class="field"><label for="fStatus">Call status</label><select id="fStatus" onchange="setForm('status', this.value)">${opt(CALL_STATUSES, f.status, 'Choose status')}</select></div>
       ${connected ? `
-      <div class="field"><label for="fOutcome">${isSvc ? 'Service feedback' : 'Outcome'}</label><select id="fOutcome" onchange="setForm('outcome', this.value)">${opt(isSvc ? SERVICE_OUTCOMES : isCamp ? CAMP_OUTCOMES : isLead ? LEAD_OUTCOMES : OUTCOMES, f.outcome, isSvc ? 'Choose feedback' : 'Choose outcome')}</select></div>
+      <div class="field"><label for="fOutcome">${isSvc ? 'Service feedback' : 'Outcome'}</label><select id="fOutcome" onchange="setForm('outcome', this.value)">${opt(isSvc ? SERVICE_OUTCOMES : row.interested ? FOLLOWUP_OUTCOMES : isCamp ? CAMP_OUTCOMES : isLead ? LEAD_OUTCOMES : OUTCOMES, f.outcome, isSvc ? 'Choose feedback' : 'Choose outcome')}</select></div>
       ${isSvc || isLead || isCamp ? '' : `<div class="field"><label for="fReason">Main reason (if not driving or not paying)</label><select id="fReason" onchange="setForm('reason', this.value)">${opt(REASONS, f.reason, 'None / not applicable')}</select></div>`}
-      ${f.outcome === 'Coming back' || (isCamp && CAMP_DATE_OUTCOMES.includes(f.outcome)) ? `<div class="field"><label for="fBack">${f.outcome === CAMP_SNOOZE_OUTCOME ? 'Call back on' : f.outcome === 'Coming back' ? 'Coming back on' : 'Coming to hub on'}</label><input type="date" id="fBack" value="${esc(f.comeback)}" min="${S.today}" onchange="setForm('comeback', this.value)"></div>` : ''}
+      ${dateLabel(f.outcome, isCamp || isLead) ? `<div class="field"><label for="fBack">${dateLabel(f.outcome, isCamp || isLead)}${dateRequired(f.outcome) ? '' : ' (optional)'}</label><input type="date" id="fBack" value="${esc(f.comeback)}" min="${S.today}" onchange="setForm('comeback', this.value)"></div>` : ''}
       ` : ''}
       <div class="field full"><label for="fComment">Remark (required)</label><textarea id="fComment" placeholder="${connected ? 'What did the driver say?' : 'e.g. rang twice, no answer'}" oninput="S.current.form.comment=this.value">${esc(f.comment)}</textarea></div>
     </div>
-    <div class="driver-sub" style="font-size:12px; margin-top:4px;">${connected ? (isCamp && f.outcome === CAMP_SNOOZE_OUTCOME ? 'Call back later keeps this lead and brings it back to the list on the call-back date.' : 'Connected with a remark moves this to Done.') : `Not connected: stays in the list. After ${RNR_MIN_TRIES} unanswered tries over ${RNR_DAYS} days it moves to the RNR tab.`}</div>
+    <div class="driver-sub" style="font-size:12px; margin-top:4px;">${connected ? ((isCamp || isLead) && isInterestedOutcome(f.outcome) ? 'Interested: this lead moves to (or stays in) the interested tab. It comes up on the date you set, or every 2nd day without one.' : 'Connected with a remark moves this to Done.') : `Not connected: stays in the list. After ${RNR_MIN_TRIES} unanswered tries over ${RNR_DAYS} days it moves to the RNR tab.`}</div>
     <div class="form-actions">
       <button class="primary" id="saveBtn" onclick="saveCall()" ${S.tableMissing ? 'disabled' : ''}>Save call</button>
       <span class="status-msg ${cur.msgCls || ''}" id="saveMsg">${esc(cur.msg || '')}</span>
@@ -1751,13 +1834,23 @@ function renderModal() {
   document.getElementById('mBody').innerHTML = `<div class="why">${why}</div>${histHtml}${svcHtml}${factsHtml}${strip}${leaveHtml}${form}`;
 }
 
+// Date asked with an outcome: drivers' "Coming back", and for leads any interested outcome
+function dateLabel(o, lead) {
+  if (o === 'Coming back') return 'Coming back on';
+  if (!lead || !o) return '';
+  if (o === CAMP_SNOOZE_OUTCOME) return 'Call back on';
+  if (o === "Didn't come, new date") return 'New visit date';
+  if (o === 'Visited, joining') return 'Joining on';
+  return isInterestedOutcome(o) ? 'Will visit hub on' : '';
+}
+function dateRequired(o) { return o === CAMP_SNOOZE_OUTCOME || o === "Didn't come, new date"; }
 function setForm(k, v) {
   const f = S.current.form;
   const commentEl = document.getElementById('fComment'); if (commentEl) f.comment = commentEl.value;
   f[k] = v;
   if (k === 'caller') lsSet('portalCaller', v);
   if (k === 'status' && v !== 'Connected') { f.outcome = ''; f.reason = ''; f.comeback = ''; }
-  if (k === 'outcome' && v !== 'Coming back' && !CAMP_DATE_OUTCOMES.includes(v)) f.comeback = '';
+  if (k === 'outcome' && !dateLabel(v, true)) f.comeback = '';
   S.current.msg = '';
   renderModal();
 }
@@ -1770,14 +1863,14 @@ async function saveCall() {
   if (!f.status) return fail('Choose the call status.');
   if (f.status === 'Connected' && !f.outcome) return fail(row.items[0].cat === 'svc' ? 'Choose the service feedback.' : 'Choose the outcome.');
   if (!(f.comment || '').trim()) return fail('Write a remark before saving.');
-  const camp = row.items.some(i => i.cat === 'camp' || i.cat === 'inc');
-  if (camp && f.outcome === CAMP_SNOOZE_OUTCOME && !f.comeback) return fail('Pick the call-back date.');
+  const leadRow = row.items.some(i => LEAD_CATS.includes(i.cat));
+  if (leadRow && dateRequired(f.outcome) && !f.comeback) return fail(f.outcome === CAMP_SNOOZE_OUTCOME ? 'Pick the call-back date.' : 'Pick the new visit date.');
   const btn = document.getElementById('saveBtn'); btn.disabled = true; btn.textContent = 'Saving…';
   const rec = {
     driver_id: row.driverId, driver_name: row.driverId ? row.name : (row.items[0].cat === 'svc' ? row.items[0].vehicle : row.name), hub: row.hub, phone: row.phone,
     item_keys: row.items.map(i => i.key), item_labels: row.items.map(itemLabel),
     caller: f.caller, call_status: f.status, outcome: f.outcome || null, reason: f.reason || null,
-    comeback_date: f.comeback || null, comment: (f.comment || '').trim(), done: f.status === 'Connected' && !(camp && f.outcome === CAMP_SNOOZE_OUTCOME),
+    comeback_date: f.comeback || null, comment: (f.comment || '').trim(), done: f.status === 'Connected' && !(leadRow && isInterestedOutcome(f.outcome)),
   };
   const { error } = await sb.from(CALLS_TABLE).insert(rec);
   if (error) { btn.disabled = false; btn.textContent = 'Save call'; return fail('Not saved: ' + error.message); }
@@ -1787,7 +1880,7 @@ async function saveCall() {
   const idx = order.indexOf(cur.rowKey);
   const list = S.lastList;
   renderAll();
-  const nowOrder = list === 'rnr' ? (S.rnrOrder || []) : (S.queueOrder || []);
+  const nowOrder = list === 'rnr' ? (S.rnrOrder || []) : list === 'interested' ? (S.interestedOrder || []) : (S.queueOrder || []);
   const next = order.slice(idx + 1).find(k => nowOrder.includes(k));
   if (next) { openRow(next, list); S.current.msg = `Saved ${row.name}. Next driver:`; S.current.msgCls = 'ok'; renderModal(); }
   else closeModal();
@@ -1958,7 +2051,7 @@ function campaignSummaryHtml(cp) {
     ${list('Already Kadam drivers', st.existingList, x => `${esc(x.name || 'no name')}, <span class="mono">${esc(x.phone)}</span>, in ledger as ${esc(x.driver)}`)}
     <div class="sub-h">Calling progress</div>
     <div class="stat-grid">
-      ${cell('Fresh (no try yet)', st.fresh)}${cell('Tried, not reached', st.tried)}${cell('In RNR', st.rnr)}${cell('Call back scheduled', st.callback)}
+      ${cell('Fresh (no try yet)', st.fresh)}${cell('Tried, not reached', st.tried)}${cell('In RNR', st.rnr)}${cell('In interested list', st.inInterested)}
       ${cell('Connected', st.connected)}${cell('Interested', st.interested, 'ok')}${cell('Converted (paid rent)', st.converted, 'ok')}${cell('Connect rate', st.callable ? Math.round((st.connected / st.callable) * 100) + '%' : '-')}
     </div>
     ${outs.length ? `<div class="sub-h">What leads said</div><div class="tbl-wrap"><table class="hist"><tbody>${outs.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v}</td></tr>`).join('')}</tbody></table></div>` : ''}
@@ -1992,7 +2085,7 @@ function openIncoming() {
 function incSet(k, v, rerender) {
   S.cm.f[k] = v;
   if (k === 'caller') lsSet('portalCaller', v);
-  if (k === 'outcome' && !CAMP_DATE_OUTCOMES.includes(v)) S.cm.f.comeback = '';
+  if (k === 'outcome' && !dateLabel(v, true)) S.cm.f.comeback = '';
   S.cm.msg = '';
   if (rerender) renderIncoming(k);
 }
@@ -2026,10 +2119,10 @@ function renderIncoming(focusKey) {
       <div class="field"><label for="iArea">Area or city</label><input type="text" id="iArea" value="${esc(f.area)}" placeholder="e.g. Sector 68, Gurgaon" oninput="incSet('area', this.value)"></div>
       <div class="field"><label>Call taken by</label><div class="seg">${CALLERS.map(c => `<button type="button" class="${f.caller === c ? 'on' : ''}" onclick="incSet('caller','${c}', true)">${c}</button>`).join('')}</div></div>
       <div class="field"><label for="iOutcome">Outcome</label><select id="iOutcome" onchange="incSet('outcome', this.value, true)">${opt(CAMP_OUTCOMES, f.outcome, 'Choose outcome')}</select></div>
-      ${CAMP_DATE_OUTCOMES.includes(f.outcome) ? `<div class="field"><label for="iBack">${f.outcome === CAMP_SNOOZE_OUTCOME ? 'Call back on' : 'Coming to hub on'}</label><input type="date" id="iBack" value="${esc(f.comeback)}" min="${S.today}" onchange="incSet('comeback', this.value)"></div>` : ''}
+      ${dateLabel(f.outcome, true) ? `<div class="field"><label for="iBack">${dateLabel(f.outcome, true)}${dateRequired(f.outcome) ? '' : ' (optional)'}</label><input type="date" id="iBack" value="${esc(f.comeback)}" min="${S.today}" onchange="incSet('comeback', this.value)"></div>` : ''}
       <div class="field full"><label for="iRemark">Remark (required)</label><textarea id="iRemark" placeholder="What did they say?" oninput="incSet('remark', this.value)">${esc(f.remark)}</textarea></div>
     </div>
-    <div class="driver-sub" style="font-size:12px; margin-top:4px;">${f.outcome === CAMP_SNOOZE_OUTCOME ? 'Call back later puts this number in the new leads list on the call-back date.' : 'Saved as a connected call and moved to Done. It counts as converted if the number pays rent later.'}</div>
+    <div class="driver-sub" style="font-size:12px; margin-top:4px;">${isInterestedOutcome(f.outcome) ? 'Interested: saved and added to the interested tab for follow-up.' : 'Saved as a connected call and moved to Done. It counts as converted if the number pays rent later.'}</div>
     <div class="form-actions"><button class="primary" id="incSave" onclick="saveIncoming()" ${m.busy ? 'disabled' : ''}>Save incoming call</button><span class="status-msg ${m.msgCls || ''}">${esc(m.msg || '')}</span></div>`;
   if (focusKey) { const el = document.getElementById({ phone: 'iPhone' }[focusKey]); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
 }
@@ -2042,7 +2135,7 @@ async function saveIncoming() {
   if (f.source === 'Other' && !f.sourceOther.trim()) return fail('Type the source.');
   if (!f.caller) return fail('Choose who took the call.');
   if (!f.outcome) return fail('Choose the outcome.');
-  if (f.outcome === CAMP_SNOOZE_OUTCOME && !f.comeback) return fail('Pick the call-back date.');
+  if (dateRequired(f.outcome) && !f.comeback) return fail('Pick the call-back date.');
   if (!f.remark.trim()) return fail('Write a remark before saving.');
   m.busy = true; m.msg = 'Saving…'; m.msgCls = ''; renderIncoming();
   const uid = 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -2054,7 +2147,7 @@ async function saveIncoming() {
     item_keys: ['incoming|' + uid], item_labels: ['Incoming lead (' + source + ')'], comment: JSON.stringify(lead) });
   if (r1.error) { m.busy = false; return fail('Not saved: ' + r1.error.message); }
   const r2 = await sb.from(CALLS_TABLE).insert({ driver_name: name, phone, caller: f.caller, call_status: 'Connected', outcome: f.outcome, comeback_date: f.comeback || null,
-    item_keys: [`inc|ph:${phone}|${uid}`], item_labels: ['Incoming call (' + source + ')'], comment: f.remark.trim(), done: f.outcome !== CAMP_SNOOZE_OUTCOME });
+    item_keys: [`inc|ph:${phone}|${uid}`], item_labels: ['Incoming call (' + source + ')'], comment: f.remark.trim(), done: !isInterestedOutcome(f.outcome) });
   if (r2.error) { m.busy = false; return fail('Lead saved but the call was not: ' + r2.error.message); }
   await loadLogs(); renderAll();
   closeCModal();
@@ -2081,8 +2174,10 @@ function dueToday() {
   const latest = {};
   S.logs.forEach(l => (l.item_keys || []).forEach(k => { const p = itemPrefix(k); if (!latest[p] || Date.parse(l.created_at) > Date.parse(latest[p].created_at)) latest[p] = l; }));
   const L = Object.values(latest);
-  return { callbacks: L.filter(l => l.outcome === CAMP_SNOOZE_OUTCOME && l.comeback_date === S.today),
-    hub: L.filter(l => l.outcome === 'Interested, coming to hub' && l.comeback_date === S.today),
+  const I = (S.Q || buildQueue(ctx())).interested;
+  const asLog = r => ({ driver_name: r.name, comment: r.lastAttempt ? r.lastAttempt.comment : '' });
+  return { callbacks: I.filter(r => /^callback-/.test(r.dueState)).map(asLog),
+    hub: I.filter(r => /^visit-/.test(r.dueState)).map(asLog),
     comingBack: L.filter(l => l.outcome === 'Coming back' && l.comeback_date === S.today) };
 }
 function renderDaily() {
@@ -2139,12 +2234,13 @@ function renderDaily() {
         <div class="sub-h">Leads converted (paid first rent)</div>${people(ds.converted, x => `${esc(x.name || x.phone)} <span class="driver-sub">now ${esc(x.driver)}</span>`)}
         <div class="sub-h">Moved to RNR</div>${people(ds.movedToRnr, x => `${esc(x.name)} <span class="driver-sub">last tried by ${esc(x.caller)}</span>`)}</div>
       <div class="card"><h3>${isLatest ? 'For today' : 'Today'}</h3>
-        <div class="stat-grid" style="grid-template-columns:repeat(3,1fr);">
-          <div><div class="k">New leads to call</div><div class="v">${q.rows.filter(r => LEAD_CATS.includes(r.items[0].cat)).length}</div></div>
+        <div class="stat-grid" style="grid-template-columns:repeat(2,1fr);">
+          <div><div class="k">Fresh leads to call</div><div class="v">${q.rows.filter(r => LEAD_CATS.includes(r.items[0].cat)).length}</div></div>
+          <div><div class="k">Interested follow-ups due</div><div class="v">${q.interested.filter(r => r.dueState !== 'scheduled').length}</div></div>
           <div><div class="k">Drivers to call</div><div class="v">${q.rows.filter(r => !LEAD_CATS.includes(r.items[0].cat)).length}</div></div>
           <div><div class="k">In RNR</div><div class="v">${q.rnr.length}</div></div></div>
-        <div class="sub-h">Call-backs due today</div>${people(due.callbacks, l => `${esc(l.driver_name)} <span class="driver-sub">${esc(l.comment || '')}</span>`)}
-        <div class="sub-h">Hub visits expected today</div>${people(due.hub, l => `${esc(l.driver_name)} <span class="driver-sub">${esc(l.comment || '')}</span>`)}
+        <div class="sub-h">Call-backs due (today or missed)</div>${people(due.callbacks, l => `${esc(l.driver_name)} <span class="driver-sub">${esc(l.comment || '')}</span>`)}
+        <div class="sub-h">Hub visits due (today or missed)</div>${people(due.hub, l => `${esc(l.driver_name)} <span class="driver-sub">${esc(l.comment || '')}</span>`)}
         <div class="sub-h">Drivers who said they'd be back today</div>${people(due.comingBack, l => `${esc(l.driver_name)} <span class="driver-sub">${esc(l.comment || '')}</span>`)}</div>
     </div>
     <div class="section"><div class="section-head"><h2>All calls</h2><div class="filters">
@@ -2277,7 +2373,7 @@ function renderImpact() {
 
 // ---------- start ----------
 refreshAll(false);
-setInterval(async () => { if (!sb || S.tableMissing) return; try { await loadLogs(); if (!S.current && !S.cm) renderAll(); else { S.Q = buildQueue(ctx()); renderQueue(); renderRnr(); renderCampaigns(); renderDone(); renderImpact(); } } catch (e) {} }, 60000);
+setInterval(async () => { if (!sb || S.tableMissing) return; try { await loadLogs(); if (!S.current && !S.cm) renderAll(); else { S.Q = buildQueue(ctx()); renderQueue(); renderInterested(); renderRnr(); renderCampaigns(); renderDone(); renderImpact(); } } catch (e) {} }, 60000);
 </script>
 </body>
 </html>
