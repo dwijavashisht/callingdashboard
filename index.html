@@ -215,6 +215,7 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
   <button class="view-nav-btn" id="navJobhai" onclick="setQueueMode('jobhai')">To call - fresh leads (Job Hai) <span class="cnt" id="cntJobhai">0</span></button>
   <button class="view-nav-btn" id="navSocial" onclick="setQueueMode('social')">To call - incoming &amp; social <span class="cnt" id="cntSocial">0</span></button>
   <button class="view-nav-btn" id="navInterested" onclick="setView('interested')">To call - interested leads <span class="cnt" id="cntInterested">0</span></button>
+  <button class="view-nav-btn" id="navOnboarded" onclick="setView('onboarded')">Onboarded <span class="cnt" id="cntOnboarded">0</span></button>
   <button class="view-nav-btn" id="navDrivers" onclick="setQueueMode('drivers')">To call - existing drivers <span class="cnt" id="cntDrivers">0</span></button>
   <button class="view-nav-btn" id="navRnr" onclick="setView('rnr')">RNR <span class="cnt" id="cntRnr">0</span></button>
   <button class="view-nav-btn" id="navCampaigns" onclick="setView('campaigns')">Campaigns <span class="cnt" id="cntCampaigns">0</span></button>
@@ -268,6 +269,18 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
     </div>
     <div class="tbl-wrap"><div class="tbl-scroll" id="intTable"></div></div>
     <div class="note" style="margin-top:8px;">Leads marked interested stay here until they pay rent (counted as converted) or a follow-up closes them. With a visit or call-back date they come up that day; without one, every 2nd day after the last call.</div>
+  </div>
+</div>
+
+<div id="viewOnboarded" style="display:none;">
+  <div class="section">
+    <div class="section-head"><h2>Onboarded leads</h2><span class="note">click a box to filter the list</span></div>
+    <div class="kpis" id="obKpis" style="grid-template-columns:repeat(4,1fr);"></div>
+  </div>
+  <div class="section">
+    <div class="section-head"><h2>Check</h2><div class="filters"><input class="search" id="obSearch" placeholder="Search name, phone or KDM ID" oninput="renderOnboarded()"></div></div>
+    <div class="tbl-wrap"><div class="tbl-scroll" id="obTable"></div></div>
+    <div class="note" style="margin-top:8px;">Passenger: checked automatically against rent paid from the lead's number (or from the KDM ID if entered). Cargo: enter the driver's KDM ID to confirm. Passenger leads who paid rent without being marked are added here automatically.</div>
   </div>
 </div>
 
@@ -356,16 +369,20 @@ const REASONS = ['Vehicle issue', 'Charging issue', 'Low earnings', 'Health', 'F
 const CALLERS = ['Jyoti', 'Nandani'];   // Swati left in Oct 2026; her past calls stay in history
 const RNR_DAYS = 10, RNR_MIN_TRIES = 7; // unanswered for 10+ days with 7+ tries -> RNR tab
 const CAMP_OUTCOMES = ['Interested, coming to hub', 'Interested, call back later', 'Interested in cargo', 'Interested in passenger',
-  'Not interested', 'Not eligible', 'Already driving with another fleet', 'Not in Delhi NCR', 'Already working in Kadam'];
+  'Not interested', 'Not eligible', 'Already driving with another fleet', 'Not in Delhi NCR', 'Already working in Kadam', 'Onboarded'];
 const INCOMING_SOURCES = ['Auto branding', 'Instagram', 'Facebook', 'WhatsApp', 'Referral', 'Walk-in', 'Other'];
 const CAMP_SNOOZE_OUTCOME = 'Interested, call back later';      // stays open, returns on the call-back date
 // Interested leads stay open in the interested tab until they pay rent or a follow-up closes them.
-const FOLLOWUP_OUTCOMES = ['Visited, joining', 'Visited, not joining', "Didn't come, new date", "Didn't come, not interested", 'Still interested', 'Already working in Kadam'];
+const FOLLOWUP_OUTCOMES = ['Visited, joining', 'Visited, not joining', "Didn't come, new date", "Didn't come, not interested", 'Still interested', 'Already working in Kadam', 'Onboarded'];
+// "Onboarded" is marked by the caller with a segment (saved in the call's reason field). Passenger
+// is checked against rent paid; cargo needs the driver's KDM ID entered by the caller.
+const ONBOARDED_OUTCOME = 'Onboarded';
+function normKdm(v) { const t = String(v || '').trim().toUpperCase().replace(/\s+/g, ''); const d = t.replace(/^KDM/, ''); return /^\d{1,7}$/.test(d) ? 'KDM' + d.padStart(7, '0') : null; }
 const FOLLOWUP_KEEP = ['Visited, joining', "Didn't come, new date", 'Still interested'];   // these keep the lead in the interested tab
 const FOLLOWUP_EVERY_DAYS = 2;
 function isInterestedOutcome(o) { return /^interested/i.test(o || '') || FOLLOWUP_KEEP.includes(o); }
 const CAMP_DATE_OUTCOMES = ['Interested, coming to hub', 'Interested, call back later'];
-const LEAD_OUTCOMES = ['Interested in Passenger', 'Interested in Cargo', 'Not Interested', 'Already working in Kadam'];
+const LEAD_OUTCOMES = ['Interested in Passenger', 'Interested in Cargo', 'Not Interested', 'Already working in Kadam', 'Onboarded'];
 const SERVICE_OUTCOMES = ['Happy with service', 'Took too long', 'New problem after service', 'Other'];
 // Passenger vehicles, copied from the passenger dashboard's MASTER_VEHICLE_LIST (138 vehicles).
 // Update both together when vehicles are added or removed.
@@ -972,6 +989,58 @@ function interestedState(r, today) {
   return { ...base, dueState: next <= today ? 'followup-due' : 'scheduled', dueDate: next };
 }
 
+// ---------- onboarded leads ----------
+// Lead details for a phone from its first source (Instagram form, campaign or incoming call)
+function leadInfoFor(phone, ctx, LI) {
+  const p = LI.primary[phone];
+  if (!p) return null;
+  if (p.src === 'insta') return { date: p.lead.date, name: p.lead.name, source: 'Instagram form', segment: null };
+  if (p.incoming) return { date: p.incoming.date, name: p.incoming.name, source: 'Incoming call (' + p.incoming.source + ')', segment: /cargo/i.test(p.incoming.interest || '') ? 'Cargo' : /passenger/i.test(p.incoming.interest || '') ? 'Passenger' : null };
+  const cp = p.campaign;
+  return { date: campLeadDate(cp, p.lead), name: p.lead.name, source: (cp.kind === 'jobhai' ? 'Job Hai ' : 'Meta ') + cp.name, segment: cp.kind === 'jobhai' ? 'Passenger' : (cp.segment || null) };
+}
+function onboardedList(ctx) {
+  const LI = ctx.leadIndex || buildLeadIndex(ctx);
+  const byPhone = {};
+  const logs = (ctx.logs || []).slice().sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  logs.forEach(l => {
+    if (l.call_status !== 'Connected' || l.outcome !== ONBOARDED_OUTCOME) return;
+    (l.item_keys || []).forEach(k => {
+      const m = k.match(/^(lead|camp|inc)\|ph:(\d{10})\|/); if (!m) return;
+      const info = leadInfoFor(m[2], ctx, LI) || { date: istDateOf(l.created_at), name: l.driver_name, source: '', segment: null };
+      byPhone[m[2]] = { phone: m[2], name: l.driver_name || info.name, segment: l.reason || info.segment || 'Passenger', source: info.source, leadDate: info.date,
+        how: 'marked', markedBy: l.caller, markedAt: l.created_at, remark: l.comment };
+    });
+  });
+  // passenger leads who paid rent without being marked: added automatically
+  Object.keys(LI.primary).forEach(ph => {
+    if (byPhone[ph]) return;
+    const info = leadInfoFor(ph, ctx, LI); if (!info || info.segment === 'Cargo') return;
+    if (existingDriver(ph, info.date, ctx.phoneRent)) return;
+    const on = leadOnboarded({ phone: ph, date: info.date }, ctx.phoneRent);
+    if (on) byPhone[ph] = { phone: ph, name: info.name, segment: 'Passenger', source: info.source, leadDate: info.date, how: 'auto', markedAt: null };
+  });
+  const ver = {};
+  (ctx.verifications || []).slice().sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)).forEach(v => { if (v.phone) ver[v.phone] = v; });
+  return Object.values(byPhone).map(e => {
+    const v = ver[e.phone];
+    const kdm = v ? v.kdm : null;
+    if (kdm) {
+      e.kdm = kdm; e.kdmBy = v.caller; e.kdmAt = v.created_at;
+      const d = ctx.drivers ? ctx.drivers[kdm] : null;
+      e.kdmName = d ? d.name : null;
+      if (e.segment === 'Cargo') return { ...e, status: 'verified', statusLabel: `Verified, ${kdm} entered by ${v.caller}` };
+      const paid = d ? d.topupDates.find(x => x >= e.leadDate) : null;
+      return paid ? { ...e, status: 'verified', statusLabel: `Verified, ${kdm} paid rent ${fmtDay(paid)}`, verifiedOn: paid }
+        : { ...e, status: 'pending', statusLabel: d ? `${kdm} has not paid rent since ${fmtDay(e.leadDate)}` : `${kdm} not found in the passenger ledger yet` };
+    }
+    if (e.segment === 'Cargo') return { ...e, status: 'needs-id', statusLabel: 'KDM ID needed' };
+    const on = leadOnboarded({ phone: e.phone, date: e.leadDate }, ctx.phoneRent);
+    return on ? { ...e, status: 'verified', statusLabel: `Verified, rent paid ${fmtDay(on.date)}${on.driver ? ' as ' + on.driver : ''}`, verifiedOn: on.date }
+      : { ...e, status: 'pending', statusLabel: 'Waiting for first rent from this number' };
+  }).sort((a, b) => ({ 'needs-id': 0, pending: 1, verified: 2 }[a.status] - { 'needs-id': 0, pending: 1, verified: 2 }[b.status]) || String(b.markedAt || b.verifiedOn || '').localeCompare(String(a.markedAt || a.verifiedOn || '')));
+}
+
 // The same call across steps: cat|who|anchor (rent lapse, joiner, lead, exit, service)
 function itemPrefix(key) { return key.split('|').slice(0, 3).join('|'); }
 // Unanswered tries since the last connected call on these prefixes
@@ -996,6 +1065,7 @@ function campaignStats(cp, ctx, q) {
   CAMP_OUTCOMES.forEach(o => { s.outcomes[o] = 0; });
   const rowByKey = {}; if (q) (q.all || []).forEach(r => r.items.forEach(i => { rowByKey[i.key] = r; }));
   const byItem = logsByItem(ctx.logs);
+  const verifiedPhones = new Set(onboardedList(ctx).filter(e => e.status === 'verified').map(e => e.phone));
   p.leads.forEach(l => {
     const pr = LI.primary[l.phone];
     if (pr && pr.src !== cp.id) { s.dupPrevious++; s.dupPreviousList.push({ name: l.name, phone: l.phone, firstIn: pr.src === 'insta' ? 'Instagram form' : pr.incoming ? 'an incoming call on ' + fmtDay(pr.incoming.date) : (pr.campaign ? pr.campaign.name : 'another list') }); return; }
@@ -1006,7 +1076,7 @@ function campaignStats(cp, ctx, q) {
     // calls on this number under any campaign count (e.g. a campaign removed and added again)
     const logs = (ctx.logs || []).filter(x => (x.item_keys || []).some(k => k.startsWith(`camp|ph:${l.phone}|`)))
       .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
-    const converted = !!leadOnboarded({ phone: l.phone, date }, ctx.phoneRent);
+    const converted = !!leadOnboarded({ phone: l.phone, date }, ctx.phoneRent) || verifiedPhones.has(l.phone);
     if (converted) s.converted++;
     if (converted && !logs.length) { s.convertedUncalled = (s.convertedUncalled || 0) + 1; return; }
     const conn = logs.filter(x => x.call_status === 'Connected');
@@ -1272,7 +1342,7 @@ function leavesFor(driverId, name, ctx) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
-  hashPick, ownerFor, assignOwners, firstCallerIndex, INCOMING_SOURCES, summaryDefaultDay, daySummary, logCat, istTime, sheetNameDate, parseJobHaiSheet, jobhaiNameFor, detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, FOLLOWUP_OUTCOMES, FOLLOWUP_KEEP, isInterestedOutcome, interestedState, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
+  ONBOARDED_OUTCOME, normKdm, onboardedList, leadInfoFor, hashPick, ownerFor, assignOwners, firstCallerIndex, INCOMING_SOURCES, summaryDefaultDay, daySummary, logCat, istTime, sheetNameDate, parseJobHaiSheet, jobhaiNameFor, detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, FOLLOWUP_OUTCOMES, FOLLOWUP_KEEP, isInterestedOutcome, interestedState, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
   buildLeadIndex, campaignStats, rnrInfo, itemPrefix, existingDriver,
   LEAD_OUTCOMES, parseLeadForm, buildPhoneRent, leadOnboarded, phone10,
   SERVICE_OUTCOMES, MASTER_VEHICLES, parseServiceTracker, sheetDay, normReg, driversOnVehicle,
@@ -1291,7 +1361,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_e6t8GrHCcaMyBJMoBZydSg_Ot8fi551';
 const CALLS_TABLE = 'calling_portal_calls';
 // Campaigns are stored as marker rows in the calls table, so no extra Supabase table is needed.
 // These rows are kept out of every call count.
-const CAMPAIGN_MARK = 'Campaign added', CAMPAIGN_REMOVED = 'Campaign removed', CAMPAIGN_CALLER = 'Portal', INCOMING_MARK = 'Incoming lead';
+const CAMPAIGN_MARK = 'Campaign added', CAMPAIGN_REMOVED = 'Campaign removed', CAMPAIGN_CALLER = 'Portal', INCOMING_MARK = 'Incoming lead', VERIFY_MARK = 'Onboarding verified';
 // Google Sheets API key, used only to list a sheet's tabs. Restrict it to the Sheets API and this
 // site's address in Google Cloud. Leave blank to read only the tab in the pasted link.
 const SHEETS_API_KEY = 'AIzaSyCg10_BuR-Qfd4XvthhjCDX8gaCqenTRCE';
@@ -1322,7 +1392,7 @@ function money(v) { return v === null || v === undefined ? '-' : '₹' + Number(
 function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
-function ctx() { return { drivers: S.drivers, sessions: S.sessions, leaves: S.leaves, exits: S.exits, logs: S.logs, today: S.today, ref: S.ref, services: S.services, leads: S.leads, phoneRent: S.phoneRent, campaigns: S.campaigns.filter(c => c.parsed), leadIndex: S.leadIndex, incoming: S.incoming || [] }; }
+function ctx() { return { drivers: S.drivers, sessions: S.sessions, leaves: S.leaves, exits: S.exits, logs: S.logs, today: S.today, ref: S.ref, services: S.services, leads: S.leads, phoneRent: S.phoneRent, campaigns: S.campaigns.filter(c => c.parsed), leadIndex: S.leadIndex, incoming: S.incoming || [], verifications: S.verifications || [] }; }
 function hubOk(hubKey) { return !S.hub || hubKey === S.hub; }
 
 // ---------- loading ----------
@@ -1419,7 +1489,16 @@ async function loadCampaigns() {
     return { id: r.id, created_at: r.created_at, name: r.driver_name, kind: meta.kind || 'meta', sheet_url: meta.sheet_url, sheet_id: meta.sheet_id, gid: meta.gid || '0',
       tab_name: meta.tab_name, segment: meta.segment, file_name: meta.file_name, rows: meta.rows };
   }).filter(c => c.name && (c.sheet_id || (c.kind === 'jobhai' && c.rows)) && !(S.removedCampaignIds || new Set()).has(c.id)).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
-  S.campaigns = await Promise.all(list.map(async cp => {
+  // The same sheet added twice (e.g. a save that seemed to fail) is shown once: the first copy is
+  // kept, later identical copies are ignored. Meta: same sheet and tab. Job Hai: same sheet name and
+  // the same phone numbers.
+  const seenCamp = new Set();
+  const sig = cp => cp.kind === 'jobhai'
+    ? 'jh|' + cp.tab_name + '|' + JSON.stringify(cp.rows || [])
+    : 'meta|' + cp.sheet_id + '|' + cp.gid;
+  S.hiddenDuplicateCampaigns = 0;
+  const uniq = list.filter(cp => { const k = sig(cp); if (seenCamp.has(k)) { S.hiddenDuplicateCampaigns++; return false; } seenCamp.add(k); return true; });
+  S.campaigns = await Promise.all(uniq.map(async cp => {
     if (cp.kind === 'jobhai') return { ...cp, parsed: parseJobHaiSheet(cp.rows, cp.tab_name, S.today, istDateOf(cp.created_at)), error: null };
     try { return { ...cp, parsed: parseCampaignSheet(await fetchSheetRows(cp.sheet_id, cp.gid), S.today), error: null }; }
     catch (e) { return { ...cp, parsed: null, error: 'Could not read this sheet (' + (e.message || e) + '). Check it is shared as Anyone with the link: Viewer.' }; }
@@ -1442,7 +1521,8 @@ async function loadLogs() {
   }
   S.tableMissing = false;
   const rows = data || [];
-  const marks = [CAMPAIGN_MARK, CAMPAIGN_REMOVED, INCOMING_MARK];
+  const marks = [CAMPAIGN_MARK, CAMPAIGN_REMOVED, INCOMING_MARK, VERIFY_MARK];
+  S.verifications = rows.filter(l => l.call_status === VERIFY_MARK).map(l => { try { const j = JSON.parse(l.comment || '{}'); return { phone: j.phone, kdm: j.kdm, caller: l.caller, created_at: l.created_at }; } catch (e) { return null; } }).filter(x => x && x.phone && x.kdm);
   S.incoming = rows.filter(l => l.call_status === INCOMING_MARK).map(l => { try { return { ...JSON.parse(l.comment || '{}'), caller: l.caller, created_at: l.created_at }; } catch (e) { return null; } })
     .filter(x => x && x.uid && x.phone);
   S.logs = rows.filter(l => !marks.includes(l.call_status));
@@ -1480,6 +1560,7 @@ function renderAll() {
   renderBanners();
   renderQueue();
   renderInterested();
+  renderOnboarded();
   renderRnr();
   renderCampaigns();
   renderDone();
@@ -1527,7 +1608,7 @@ function logGroup(l) {
 function isLeadLog(l) { return (l.item_keys || []).some(k => /^(lead|camp|inc)\|/.test(k)); }
 function setView(v) {
   S.view = v;
-  ['queue', 'interested', 'rnr', 'campaigns', 'done', 'daily', 'impact'].forEach(x => {
+  ['queue', 'interested', 'onboarded', 'rnr', 'campaigns', 'done', 'daily', 'impact'].forEach(x => {
     document.getElementById('view' + x[0].toUpperCase() + x.slice(1)).style.display = x === v ? '' : 'none';
     if (x !== 'queue') document.getElementById('nav' + x[0].toUpperCase() + x.slice(1)).classList.toggle('active', x === v);
   });
@@ -1634,6 +1715,49 @@ function renderInterested() {
         <td class="hide-sm" style="font-size:12px; max-width:260px;">${last ? `${esc(last.call_status)}${last.outcome ? ', ' + esc(last.outcome) : ''}<div class="driver-sub">${esc(last.caller)}, ${callTime(last.created_at)}${last.comment ? ': ' + esc(last.comment) : ''}</div>` : ''}</td>
         <td><button class="call-now" onclick="openRow('${esc(r.rowKey)}', 'interested')">Call now</button></td></tr>`;
     }).join('') + '</tbody></table>';
+}
+function renderOnboarded() {
+  if (!S.today) return;
+  const all = onboardedList(ctx());
+  S.obList = all;
+  document.getElementById('cntOnboarded').textContent = all.length;
+  const groups = [['needs-id', 'KDM ID needed', 'c-rose'], ['pending', 'Waiting for rent', 'c-amber'], ['verified', 'Verified', 'c-teal'], [null, 'All onboarded', 'c-blue']];
+  document.getElementById('obKpis').innerHTML = groups.map(([g, label, cls]) => {
+    const on = (S.obFilter || null) === g;
+    return `<button class="kpi ${cls} ${on ? 'active-filter' : ''}" onclick="S.obFilter=${g ? `'${g}'` : 'null'}; renderOnboarded();"><div class="label">${label}</div><div class="value">${g ? all.filter(e => e.status === g).length : all.length}</div></button>`;
+  }).join('');
+  let rows = S.obFilter ? all.filter(e => e.status === S.obFilter) : all;
+  const qv = (document.getElementById('obSearch').value || '').trim().toLowerCase();
+  if (qv) rows = rows.filter(e => [e.name, e.phone, e.kdm].some(x => String(x || '').toLowerCase().includes(qv)));
+  const el = document.getElementById('obTable');
+  if (!rows.length) { el.innerHTML = '<div class="empty">Nobody here yet. Mark a lead "Onboarded" from the call page.</div>'; return; }
+  const savedCaller = lsGet('portalCaller');
+  const cls = { verified: 'b-ok', pending: 'b-rent3', 'needs-id': 'b-bad' };
+  el.innerHTML = `<table><thead><tr><th>Lead</th><th>Phone</th><th>Segment</th><th class="hide-sm">Source</th><th>Onboarded</th><th>Check</th><th>KDM ID</th></tr></thead><tbody>` +
+    rows.map(e => `<tr>
+      <td><div class="driver-name">${esc(e.name || e.phone)}</div>${e.kdmName ? `<div class="driver-sub">ledger: ${esc(e.kdmName)}</div>` : ''}</td>
+      <td class="mono" style="font-size:12px;">${esc(e.phone)}</td>
+      <td>${esc(e.segment)}</td>
+      <td class="hide-sm" style="font-size:12px;">${esc(e.source || '-')}<div class="driver-sub">lead ${shortDate(e.leadDate)}</div></td>
+      <td style="font-size:12px;">${e.how === 'auto' ? 'Auto, paid rent' : `${esc(e.markedBy)}, ${callTime(e.markedAt)}`}${e.remark ? `<div class="driver-sub">${esc(e.remark)}</div>` : ''}</td>
+      <td><span class="badge ${cls[e.status]}">${esc(e.statusLabel)}</span></td>
+      <td style="white-space:nowrap;">${e.status === 'verified' && e.how === 'auto' && !e.kdm ? '<span class="driver-sub">not needed</span>' : `
+        <input type="text" id="kdm-${e.phone}" value="${esc(e.kdm || '')}" placeholder="KDM0001234" style="width:120px; border:1.5px solid #c7cac4; border-radius:8px; padding:5px 8px; font-family:'IBM Plex Mono',monospace; font-size:12px;">
+        <select id="kby-${e.phone}" style="border:1.5px solid #c7cac4; border-radius:8px; padding:5px;">${CALLERS.map(c => `<option ${c === savedCaller ? 'selected' : ''}>${c}</option>`).join('')}</select>
+        <button class="filter-btn" style="padding:5px 10px;" onclick="saveKdm('${e.phone}')">Save</button>
+        <div class="status-msg" id="kmsg-${e.phone}"></div>`}</td></tr>`).join('') + '</tbody></table>';
+}
+async function saveKdm(phone) {
+  const e = (S.obList || []).find(x => x.phone === phone); if (!e) return;
+  const kdm = normKdm(document.getElementById('kdm-' + phone).value);
+  const by = document.getElementById('kby-' + phone).value;
+  const msg = document.getElementById('kmsg-' + phone);
+  if (!kdm) { msg.textContent = 'Enter a KDM ID, e.g. KDM0008435 or 8435'; msg.className = 'status-msg err'; return; }
+  lsSet('portalCaller', by);
+  const { error } = await sb.from(CALLS_TABLE).insert({ driver_name: e.name || phone, phone, caller: by, call_status: VERIFY_MARK, done: false,
+    item_keys: ['onboard|ph:' + phone], item_labels: ['Onboarding check: ' + kdm], comment: JSON.stringify({ phone, kdm, segment: e.segment }) });
+  if (error) { msg.textContent = 'Not saved: ' + error.message; msg.className = 'status-msg err'; return; }
+  await loadLogs(); renderAll();
 }
 function renderRnr() {
   let rows = rnrRows();
@@ -1875,12 +1999,13 @@ function renderModal() {
       <div class="field"><label for="fStatus">Call status</label><select id="fStatus" onchange="setForm('status', this.value)">${opt(CALL_STATUSES, f.status, 'Choose status')}</select></div>
       ${connected ? `
       <div class="field"><label for="fOutcome">${isSvc ? 'Service feedback' : 'Outcome'}</label><select id="fOutcome" onchange="setForm('outcome', this.value)">${opt(isSvc ? SERVICE_OUTCOMES : row.interested ? FOLLOWUP_OUTCOMES : isCamp ? CAMP_OUTCOMES : isLead ? LEAD_OUTCOMES : OUTCOMES, f.outcome, isSvc ? 'Choose feedback' : 'Choose outcome')}</select></div>
+      ${(isLead || isCamp) && f.outcome === ONBOARDED_OUTCOME ? `<div class="field"><label for="fSeg">Onboarded as</label><select id="fSeg" onchange="setForm('reason', this.value)"><option value="">Choose</option>${['Passenger', 'Cargo'].map(x => `<option ${f.reason === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>` : ''}
       ${isSvc || isLead || isCamp ? '' : `<div class="field"><label for="fReason">Main reason (if not driving or not paying)</label><select id="fReason" onchange="setForm('reason', this.value)">${opt(REASONS, f.reason, 'None / not applicable')}</select></div>`}
       ${dateLabel(f.outcome, isCamp || isLead) ? `<div class="field"><label for="fBack">${dateLabel(f.outcome, isCamp || isLead)}${dateRequired(f.outcome) ? '' : ' (optional)'}</label><input type="date" id="fBack" value="${esc(f.comeback)}" min="${S.today}" onchange="setForm('comeback', this.value)"></div>` : ''}
       ` : ''}
       <div class="field full"><label for="fComment">Remark (required)</label><textarea id="fComment" placeholder="${connected ? 'What did the driver say?' : 'e.g. rang twice, no answer'}" oninput="S.current.form.comment=this.value">${esc(f.comment)}</textarea></div>
     </div>
-    <div class="driver-sub" style="font-size:12px; margin-top:4px;">${connected ? ((isCamp || isLead) && isInterestedOutcome(f.outcome) ? 'Interested: this lead moves to (or stays in) the interested tab. It comes up on the date you set, or every 2nd day without one.' : 'Connected with a remark moves this to Done.') : `Not connected: stays in the list. After ${RNR_MIN_TRIES} unanswered tries over ${RNR_DAYS} days it moves to the RNR tab.`}</div>
+    <div class="driver-sub" style="font-size:12px; margin-top:4px;">${connected ? ((isCamp || isLead) && f.outcome === ONBOARDED_OUTCOME ? 'Onboarded: moves to the Onboarded tab. Passenger is checked against rent; cargo needs the KDM ID there.' : (isCamp || isLead) && isInterestedOutcome(f.outcome) ? 'Interested: this lead moves to (or stays in) the interested tab. It comes up on the date you set, or every 2nd day without one.' : 'Connected with a remark moves this to Done.') : `Not connected: stays in the list. After ${RNR_MIN_TRIES} unanswered tries over ${RNR_DAYS} days it moves to the RNR tab.`}</div>
     <div class="form-actions">
       <button class="primary" id="saveBtn" onclick="saveCall()" ${S.tableMissing ? 'disabled' : ''}>Save call</button>
       <span class="status-msg ${cur.msgCls || ''}" id="saveMsg">${esc(cur.msg || '')}</span>
@@ -1908,6 +2033,7 @@ function setForm(k, v) {
   if (k === 'caller') lsSet('portalCaller', v);
   if (k === 'status' && v !== 'Connected') { f.outcome = ''; f.reason = ''; f.comeback = ''; }
   if (k === 'outcome' && !dateLabel(v, true)) f.comeback = '';
+  if (k === 'outcome' && v !== ONBOARDED_OUTCOME && ['Passenger', 'Cargo'].includes(f.reason)) f.reason = '';
   S.current.msg = '';
   renderModal();
 }
@@ -1921,6 +2047,7 @@ async function saveCall() {
   if (f.status === 'Connected' && !f.outcome) return fail(row.items[0].cat === 'svc' ? 'Choose the service feedback.' : 'Choose the outcome.');
   if (!(f.comment || '').trim()) return fail('Write a remark before saving.');
   const leadRow = row.items.some(i => LEAD_CATS.includes(i.cat));
+  if (leadRow && f.outcome === ONBOARDED_OUTCOME && !['Passenger', 'Cargo'].includes(f.reason)) return fail('Choose if they joined passenger or cargo.');
   if (leadRow && dateRequired(f.outcome) && !f.comeback) return fail(f.outcome === CAMP_SNOOZE_OUTCOME ? 'Pick the call-back date.' : 'Pick the new visit date.');
   const btn = document.getElementById('saveBtn'); btn.disabled = true; btn.textContent = 'Saving…';
   const rec = {
@@ -1959,7 +2086,7 @@ function renderCampaigns() {
         <td class="num">${st.callable}</td><td class="num">${st.fresh}</td><td class="num hide-sm">${st.tried}</td><td class="num hide-sm">${st.rnr}</td>
         <td class="num">${st.connected}</td><td class="num">${st.interested}</td><td class="num"><b>${st.converted}</b></td>
         <td style="white-space:nowrap;"><button class="filter-btn" onclick="openCampaignSummary('${cp.id}')">Summary</button> <button class="filter-btn" onclick="showCampaignCalls('${cp.id}')">Calls</button> <button class="filter-btn" onclick="removeCampaign('${cp.id}')">Remove</button></td></tr>`;
-    }).join('') + '</tbody></table></div></div><div class="note" style="margin-top:8px;">Leads = new numbers to call, after removing invalid numbers, duplicates and existing Kadam drivers. Converted = the number paid rent on or after the lead date.</div>';
+    }).join('') + '</tbody></table></div></div><div class="note" style="margin-top:8px;">Leads = new numbers to call, after removing invalid numbers, duplicates and existing Kadam drivers. Converted = the number paid rent on or after the lead date.' + (S.hiddenDuplicateCampaigns ? ` ${S.hiddenDuplicateCampaigns} repeated upload${S.hiddenDuplicateCampaigns === 1 ? '' : 's'} of the same sheet ${S.hiddenDuplicateCampaigns === 1 ? 'is' : 'are'} hidden.` : '') + '</div>';
 }
 // Removing adds a "Campaign removed" entry; the campaign and its open lead calls disappear.
 // Calls already made stay in Done and in each number's history, and a closed lead is not called
@@ -2115,8 +2242,20 @@ function renderAddCampaign(focusKey) {
   if (focusKey) { const el = document.getElementById(focusKey); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
 }
 async function saveCampaigns() {
-  const m = S.cm; const tabs = m.tabs.filter(t => t.include);
-  const fail = msg => { m.msg = msg; m.msgCls = 'err'; renderAddCampaign(); };
+  const m = S.cm; if (m.busy) return;
+  const fail = msg => { m.busy = false; m.msg = msg; m.msgCls = 'err'; renderAddCampaign(); };
+  // reload first, so a campaign someone else (or an earlier click) already saved is caught
+  m.busy = true; m.msg = 'Checking…'; m.msgCls = ''; renderAddCampaign();
+  try { await loadLogs(); await loadCampaigns(); } catch (e) {}
+  m.busy = false;
+  if (m.source === 'jobhai') m.tabs.forEach(t => {
+    const phones = new Set(t.parsed ? t.parsed.leads.map(l => l.phone) : []);
+    t.already = S.campaigns.find(c => c.kind === 'jobhai' && c.tab_name === t.title && c.parsed && c.parsed.leads.length === phones.size && c.parsed.leads.every(l => phones.has(l.phone))) || null;
+    if (t.already) t.include = false;
+  });
+  else m.tabs.forEach(t => { t.already = S.campaigns.find(c => c.sheet_id === (m.ref && m.ref.id) && String(c.gid) === String(t.gid)) || t.already || null; if (t.already) t.include = false; });
+  const tabs = m.tabs.filter(t => t.include);
+  if (!tabs.length) return fail('These sheets are already added.');
   for (const t of tabs) {
     if (!t.title.trim()) return fail('Type the tab name for each tab you are adding.');
     if (!t.segment) return fail(`Pick Cargo or Passenger for ${t.title || 'each tab'}.`);
@@ -2231,6 +2370,7 @@ function renderIncoming(focusKey) {
       <div class="field"><label for="iArea">Area or city</label><input type="text" id="iArea" value="${esc(f.area)}" placeholder="e.g. Sector 68, Gurgaon" oninput="incSet('area', this.value)"></div>
       <div class="field"><label>Call taken by</label><div class="seg">${CALLERS.map(c => `<button type="button" class="${f.caller === c ? 'on' : ''}" onclick="incSet('caller','${c}', true)">${c}</button>`).join('')}</div></div>
       <div class="field"><label for="iOutcome">Outcome</label><select id="iOutcome" onchange="incSet('outcome', this.value, true)">${opt(CAMP_OUTCOMES, f.outcome, 'Choose outcome')}</select></div>
+      ${f.outcome === ONBOARDED_OUTCOME ? `<div class="field"><label for="iSeg">Onboarded as</label><select id="iSeg" onchange="incSet('seg', this.value)"><option value="">Choose</option>${['Passenger', 'Cargo'].map(x => `<option ${f.seg === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>` : ''}
       ${dateLabel(f.outcome, true) ? `<div class="field"><label for="iBack">${dateLabel(f.outcome, true)}${dateRequired(f.outcome) ? '' : ' (optional)'}</label><input type="date" id="iBack" value="${esc(f.comeback)}" min="${S.today}" onchange="incSet('comeback', this.value)"></div>` : ''}
       <div class="field full"><label for="iRemark">Remark (required)</label><textarea id="iRemark" placeholder="What did they say?" oninput="incSet('remark', this.value)">${esc(f.remark)}</textarea></div>
     </div>
@@ -2248,6 +2388,7 @@ async function saveIncoming() {
   if (!f.caller) return fail('Choose who took the call.');
   if (!f.outcome) return fail('Choose the outcome.');
   if (dateRequired(f.outcome) && !f.comeback) return fail('Pick the call-back date.');
+  if (f.outcome === ONBOARDED_OUTCOME && !['Passenger', 'Cargo'].includes(f.seg)) return fail('Choose if they joined passenger or cargo.');
   if (!f.remark.trim()) return fail('Write a remark before saving.');
   m.busy = true; m.msg = 'Saving…'; m.msgCls = ''; renderIncoming();
   const uid = 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -2258,7 +2399,7 @@ async function saveIncoming() {
   const r1 = await sb.from(CALLS_TABLE).insert({ driver_name: name, phone, caller: f.caller, call_status: INCOMING_MARK, done: false,
     item_keys: ['incoming|' + uid], item_labels: ['Incoming lead (' + source + ')'], comment: JSON.stringify(lead) });
   if (r1.error) { m.busy = false; return fail('Not saved: ' + r1.error.message); }
-  const r2 = await sb.from(CALLS_TABLE).insert({ driver_name: name, phone, caller: f.caller, call_status: 'Connected', outcome: f.outcome, comeback_date: f.comeback || null,
+  const r2 = await sb.from(CALLS_TABLE).insert({ driver_name: name, phone, caller: f.caller, call_status: 'Connected', outcome: f.outcome, comeback_date: f.comeback || null, reason: f.outcome === ONBOARDED_OUTCOME ? f.seg : null,
     item_keys: [`inc|ph:${phone}|${uid}`], item_labels: ['Incoming call (' + source + ')'], comment: f.remark.trim(), done: !isInterestedOutcome(f.outcome) });
   if (r2.error) { m.busy = false; return fail('Lead saved but the call was not: ' + r2.error.message); }
   await loadLogs(); renderAll();
@@ -2485,7 +2626,7 @@ function renderImpact() {
 
 // ---------- start ----------
 refreshAll(false);
-setInterval(async () => { if (!sb || S.tableMissing) return; try { await loadLogs(); if (!S.current && !S.cm) renderAll(); else { S.Q = buildQueue(ctx()); renderQueue(); renderInterested(); renderRnr(); renderCampaigns(); renderDone(); renderImpact(); } } catch (e) {} }, 60000);
+setInterval(async () => { if (!sb || S.tableMissing) return; try { await loadLogs(); if (!S.current && !S.cm) renderAll(); else { S.Q = buildQueue(ctx()); renderQueue(); renderInterested(); renderOnboarded(); renderRnr(); renderCampaigns(); renderDone(); renderImpact(); } } catch (e) {} }, 60000);
 </script>
 </body>
 </html>
