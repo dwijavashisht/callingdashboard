@@ -1427,7 +1427,15 @@ async function loadCampaigns() {
 }
 
 async function loadLogs() {
-  const { data, error } = await sb.from(CALLS_TABLE).select('*').order('created_at', { ascending: true }).limit(10000);
+  // Supabase returns at most 1,000 rows per request, so read the table in pages. Without this the
+  // newest calls (and newly added campaigns) silently went missing once the table passed 1,000 rows.
+  const PAGE = 1000; let data = [], error = null;
+  for (let from = 0; ; from += PAGE) {
+    const res = await sb.from(CALLS_TABLE).select('*').order('created_at', { ascending: true }).order('id', { ascending: true }).range(from, from + PAGE - 1);
+    if (res.error) { error = res.error; break; }
+    data = data.concat(res.data || []);
+    if (!res.data || res.data.length < PAGE) break;
+  }
   if (error) {
     if (/does not exist|relation|schema cache|not find/i.test(error.message || '') || error.code === '42P01' || error.code === 'PGRST205') { S.tableMissing = true; S.logs = []; return; }
     throw error;
