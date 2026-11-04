@@ -30,7 +30,7 @@ button,select,input,textarea{font:inherit;}
 .view-nav-btn{background:none; border:none; border-bottom:2px solid transparent; padding:10px 4px; margin-right:20px; font-family:'Barlow Condensed',sans-serif; font-size:16px; font-weight:600; color:var(--ink-dim); cursor:pointer; white-space:nowrap;}
 .view-nav-btn:hover{color:var(--ink);}
 .view-nav-btn.active{color:var(--ink); border-bottom-color:var(--blue);}
-.view-nav-btn .cnt{font-family:'IBM Plex Mono',monospace; font-size:11px; background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:1px 7px; margin-left:6px; color:var(--ink-dim);}
+.view-nav-btn .cnt{display:none !important; font-family:'IBM Plex Mono',monospace; font-size:11px; background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:1px 7px; margin-left:6px; color:var(--ink-dim);}
 
 .filters{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
 .filter-btn{font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--ink); border:1.5px solid #c7cac4; border-radius:20px; padding:7px 14px; background:var(--panel); cursor:pointer;}
@@ -265,10 +265,10 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
   <div class="section">
     <div class="section-head">
       <h2 id="intTitle">Follow-ups</h2>
-      <div class="filters"><span class="filters" id="intOwners"></span><input class="search" id="intSearch" placeholder="Search name or phone" oninput="renderInterested()"></div>
+      <div class="filters"><select id="intLoc" class="search" style="min-width:0;" onchange="S.intLoc=this.value||null; renderInterested();"></select><span class="filters" id="intOwners"></span><input class="search" id="intSearch" placeholder="Search name or phone" oninput="renderInterested()"></div>
     </div>
     <div class="tbl-wrap"><div class="tbl-scroll" id="intTable"></div></div>
-    <div class="note" style="margin-top:8px;">Leads marked interested stay here until they pay rent (counted as converted) or a follow-up closes them. With a visit or call-back date they come up that day; without one, every 2nd day after the last call.</div>
+    <div class="note" style="margin-top:8px;">Leads marked interested stay here until they pay rent (counted as converted) or a follow-up closes them. With a visit or call-back date they wait under Scheduled and come up that day; without a date they stay under Follow-up due (tried today sorts to the bottom).</div>
   </div>
 </div>
 
@@ -312,7 +312,7 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
       <h2 id="dailyTitle" style="font-size:22px; margin:0 6px;"></h2>
       <button class="filter-btn" id="dailyNext" onclick="stepDay(1)" aria-label="Next day">›</button>
     </div>
-    <div class="filters"><button class="filter-btn" onclick="copyDaily()">Copy for WhatsApp</button><span class="status-msg" id="copyMsg"></span></div>
+    <div class="filters"><button class="filter-btn" id="dPrevBtn" onclick="S.dailyDay=summaryDefaultDay(S.today); renderDaily();">Last calling day</button><button class="filter-btn" id="dTodayBtn" onclick="S.dailyDay=S.today; renderDaily();">Today</button><button class="filter-btn" onclick="copyDaily()">Copy for WhatsApp</button><span class="status-msg" id="copyMsg"></span></div>
   </div>
   <div id="dailyBody"></div>
 </div>
@@ -373,13 +373,15 @@ const CAMP_OUTCOMES = ['Interested, coming to hub', 'Interested, call back later
 const INCOMING_SOURCES = ['Auto branding', 'Instagram', 'Facebook', 'WhatsApp', 'Referral', 'Walk-in', 'Other'];
 const CAMP_SNOOZE_OUTCOME = 'Interested, call back later';      // stays open, returns on the call-back date
 // Interested leads stay open in the interested tab until they pay rent or a follow-up closes them.
-const FOLLOWUP_OUTCOMES = ['Visited, joining', 'Visited, not joining', "Didn't come, new date", "Didn't come, not interested", 'Still interested', 'Already working in Kadam', 'Onboarded'];
+const FOLLOWUP_OUTCOMES = ['Will visit', 'Rescheduled', 'Visited, joining', 'Visited, not joining', "Didn't come, new date", "Didn't come, not interested", 'Still interested', 'Already working in Kadam', 'Onboarded'];
 // "Onboarded" is marked by the caller with a segment (saved in the call's reason field). Passenger
 // is checked against rent paid; cargo needs the driver's KDM ID entered by the caller.
 const ONBOARDED_OUTCOME = 'Onboarded';
+// Hub an interested lead would join. Saved in the call's reason field with interested outcomes.
+const LEAD_LOCATIONS = ['Passenger - Wazirabad (52)', 'Passenger - Rajeev Chowk (33)', 'Passenger - Hero Honda (68)',
+  'Cargo - Nilothi', 'Cargo - Saket', 'Cargo - Wazirabad', 'Cargo - Noida', 'Cargo - Ali Village', 'Cargo - Ghazipur', 'Cargo - Ashok Vihar / Shalimar Bagh'];
 function normKdm(v) { const t = String(v || '').trim().toUpperCase().replace(/\s+/g, ''); const d = t.replace(/^KDM/, ''); return /^\d{1,7}$/.test(d) ? 'KDM' + d.padStart(7, '0') : null; }
-const FOLLOWUP_KEEP = ['Visited, joining', "Didn't come, new date", 'Still interested'];   // these keep the lead in the interested tab
-const FOLLOWUP_EVERY_DAYS = 2;
+const FOLLOWUP_KEEP = ['Will visit', 'Rescheduled', 'Visited, joining', "Didn't come, new date", 'Still interested'];   // these keep the lead in the interested tab
 function isInterestedOutcome(o) { return /^interested/i.test(o || '') || FOLLOWUP_KEEP.includes(o); }
 const CAMP_DATE_OUTCOMES = ['Interested, coming to hub', 'Interested, call back later'];
 const LEAD_OUTCOMES = ['Interested in Passenger', 'Interested in Cargo', 'Not Interested', 'Already working in Kadam', 'Onboarded'];
@@ -389,9 +391,9 @@ const SERVICE_OUTCOMES = ['Happy with service', 'Took too long', 'New problem af
 const MASTER_VEHICLES = new Set(`HR55AX8126 HR55AX7619 HR55AX3907 HR55AX1827 HR55AX6956 HR55AX6315 HR55AX3984 HR55AX7701 HR55AX6742 HR55AX8870 HR55AY4364 HR55AY1555 HR55AY7485 HR55AY5652 HR55AY3908 HR55AY5313 HR55AY7435 HR55AY5129 HR55AY2131 HR55AY7978 HR55AY9442 HR55AY8331 HR55AY1196 HR55AY2869 HR55AY3090 HR55AY4553 HR55AY1267 HR55AY5689 HR55AY7331 HR55AY2872 HR55AY1424 HR55AY8533 HR55AY6043 HR55AY1348 HR55AZ5920 HR55AZ0305 HR55AZ4412 HR55AZ1179 HR55AZ3134 HR55AZ9162 HR55AZ9194 HR55AZ5122 HR55AZ0539 HR55AZ9198 HR55AZ5152 HR55AZ5131 HR55AZ6331 HR55AZ6945 HR55AZ5818 HR55AZ2926 HR55AZ3558 HR55AZ4836 HR55AZ8618 HR55AZ5118 HR55AZ8796 HR55AZ3300 HR55AZ9788 HR55AZ0630 HR55BB0138 HR55BB7106 HR55BB9457 HR55BB9486 HR55BB5599 HR55BB5990 HR55BB2123 HR55BB7571 HR55BB8841 HR55BB2614 HR55BB5558 HR55BB6087 HR55BC2751 HR55BC3974 HR55BC0365 HR55BC4384 HR55BC0297 HR55BC8680 HR55BC2114 HR55BC7156 HR55BC1585 HR55BC5990 HR55BC8188 HR55BC4275 HR55BC2333 HR55BC8603 HR55BC2495 HR55BC1360 HR55BC9354 HR55BC9795 HR55BC9322 HR55BC7385 HR55BC4794 HR55BC6385 HR55BD0298 HR55BD0674 HR55BD1217 HR55BD8570 HR55BD5336 HR55BD0771 HR55BD7649 HR55BD4410 HR55BD6067 HR55BD9136 HR55BD3429 HR55BD0143 HR55BD9822 HR55BD7475 HR55BD7108 HR55BD1349 HR55BD5914 HR55BD1016 HR55BD3595 HR55BD0943 HR55BD8483 HR55BD7865 HR55BD5381 HR55BD2227 HR55BD8011 HR55BD2149 HR55BD8310 HR55BD8891 HR55BD6263 HR55BD1104 HR55BE9690 HR55BE2909 HR55BE0449 HR55BE4329 HR55BE1760 HR55BE8743 HR55BE0260 HR55BE3562 HR55BE7992 HR55BE6248 HR55BE9701 HR55BE2056 HR55BE4225 HR55BE8784 HR55BE0608 HR55BE8835`.split(' '));
 
 const HUBS = [
-  { key: 'rajeev-chowk', label: 'Rajeev Chowk (Sec 68)', short: 'Rajeev Chowk', payoutSuffixes: ['rajeev chowk'] },
-  { key: 'badshahpur', label: 'Badshahpur (Hero Honda, Sec 33)', short: 'Badshahpur', payoutSuffixes: ['', 'badshahpur'] },
-  { key: 'wazirabad', label: 'Wazirabad', short: 'Wazirabad', payoutSuffixes: ['wazirabad'] },
+  { key: 'rajeev-chowk', label: 'Rajeev Chowk (Sec 33)', short: 'Rajeev Chowk', payoutSuffixes: ['rajeev chowk'] },
+  { key: 'badshahpur', label: 'Badshahpur (Hero Honda, Sec 68)', short: 'Badshahpur', payoutSuffixes: ['', 'badshahpur'] },
+  { key: 'wazirabad', label: 'Wazirabad (Sec 52)', short: 'Wazirabad', payoutSuffixes: ['wazirabad'] },
 ];
 const PASSENGER_PAYOUT_PREFIX = /^kadam\s+rental\s+3w\s+monthly\b/i;
 
@@ -937,7 +939,7 @@ function buildQueue(ctx) {
   });
   const interested = list.filter(r => r.interested && !r.rnr);
   const rank = { 'visit-today': 0, 'visit-missed': 1, 'callback-today': 2, 'callback-missed': 3, 'followup-due': 4, scheduled: 9 };
-  interested.sort((a, b) => (rank[a.dueState] - rank[b.dueState]) || String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
+  interested.sort((a, b) => (rank[a.dueState] - rank[b.dueState]) || ((a.triedToday ? 1 : 0) - (b.triedToday ? 1 : 0)) || String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
   return { rows: list.filter(r => !r.rnr && !r.interested), rnr: list.filter(r => r.rnr), interested,
     snoozed: [], all: list, items, byItem };
 }
@@ -969,7 +971,7 @@ function ownerFor(r, idx) {
 function assignOwners(rows, logs) { const idx = firstCallerIndex(logs); rows.forEach(r => Object.assign(r, ownerFor(r, idx))); return rows; }
 
 // Where an interested lead stands. Visit (or call-back) date: due that day, missed if it passed with
-// no call since. No date: due every FOLLOWUP_EVERY_DAYS days after the last call.
+// no call since. No date: stays under follow-up due.
 function interestedState(r, today) {
   const conn = r.attempts.filter(l => l.call_status === 'Connected');
   const lastConn = conn[conn.length - 1];
@@ -979,14 +981,16 @@ function interestedState(r, today) {
   const date = lastConn.comeback_date || null;
   const kind = lastConn.outcome === CAMP_SNOOZE_OUTCOME ? 'callback' : 'visit';
   const firstInterest = conn.filter(l => /^interested/i.test(l.outcome || '')).pop();
-  const base = { interested: true, interestOutcome: lastConn.outcome, interestType: firstInterest ? firstInterest.outcome : lastConn.outcome, visitDate: kind === 'visit' ? date : null, callbackDate: kind === 'callback' ? date : null };
+  const locLog = conn.filter(l => LEAD_LOCATIONS.includes(l.reason)).pop();
+  const base = { interested: true, location: locLog ? locLog.reason : null, interestOutcome: lastConn.outcome, interestType: firstInterest ? firstInterest.outcome : lastConn.outcome, visitDate: kind === 'visit' ? date : null, callbackDate: kind === 'callback' ? date : null };
   if (date && lastDate < date) {
     if (date > today) return { ...base, dueState: 'scheduled', dueDate: date };
     if (date === today) return { ...base, dueState: kind + '-today', dueDate: date };
     return { ...base, dueState: kind + '-missed', dueDate: date };
   }
-  const next = addDays(lastDate, FOLLOWUP_EVERY_DAYS);
-  return { ...base, dueState: next <= today ? 'followup-due' : 'scheduled', dueDate: next };
+  // No visit or call-back date waiting: stays due (never "scheduled"), whatever the last call was.
+  // Leads already tried today sort to the bottom of the due list.
+  return { ...base, dueState: 'followup-due', dueDate: lastDate, triedToday: lastDate === today };
 }
 
 // ---------- onboarded leads ----------
@@ -1342,7 +1346,7 @@ function leavesFor(driverId, name, ctx) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
-  ONBOARDED_OUTCOME, normKdm, onboardedList, leadInfoFor, hashPick, ownerFor, assignOwners, firstCallerIndex, INCOMING_SOURCES, summaryDefaultDay, daySummary, logCat, istTime, sheetNameDate, parseJobHaiSheet, jobhaiNameFor, detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, FOLLOWUP_OUTCOMES, FOLLOWUP_KEEP, isInterestedOutcome, interestedState, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
+  LEAD_LOCATIONS, ONBOARDED_OUTCOME, normKdm, onboardedList, leadInfoFor, hashPick, ownerFor, assignOwners, firstCallerIndex, INCOMING_SOURCES, summaryDefaultDay, daySummary, logCat, istTime, sheetNameDate, parseJobHaiSheet, jobhaiNameFor, detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, FOLLOWUP_OUTCOMES, FOLLOWUP_KEEP, isInterestedOutcome, interestedState, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
   buildLeadIndex, campaignStats, rnrInfo, itemPrefix, existingDriver,
   LEAD_OUTCOMES, parseLeadForm, buildPhoneRent, leadOnboarded, phone10,
   SERVICE_OUTCOMES, MASTER_VEHICLES, parseServiceTracker, sheetDay, normReg, driversOnVehicle,
@@ -1695,6 +1699,10 @@ function renderInterested() {
     return `<button class="kpi ${cls} ${on ? 'active-filter' : ''}" onclick="S.intFilter=${on ? 'null' : `'${g}'`}; renderInterested();"><div class="label">${label}</div><div class="value">${rows.filter(r => inDueGroup(r, g)).length}</div></button>`;
   }).join('');
   if (S.intFilter) rows = rows.filter(r => inDueGroup(r, S.intFilter));
+  const locSel = document.getElementById('intLoc');
+  locSel.innerHTML = `<option value="">All locations (${rows.length})</option>` + LEAD_LOCATIONS.map(x => `<option value="${esc(x)}" ${S.intLoc === x ? 'selected' : ''}>${esc(x)} (${rows.filter(r => r.location === x).length})</option>`).join('') +
+    `<option value="__none" ${S.intLoc === '__none' ? 'selected' : ''}>No location yet (${rows.filter(r => !r.location).length})</option>`;
+  if (S.intLoc) rows = rows.filter(r => S.intLoc === '__none' ? !r.location : r.location === S.intLoc);
   document.getElementById('intOwners').innerHTML = ownerChips(rows, 'renderInterested();');
   rows = rows.filter(ownerOk);
   const qv = (document.getElementById('intSearch').value || '').trim().toLowerCase();
@@ -1702,16 +1710,17 @@ function renderInterested() {
   S.interestedOrder = rows.map(r => r.rowKey);
   const el = document.getElementById('intTable');
   if (!rows.length) { el.innerHTML = '<div class="empty">No interested leads here.</div>'; return; }
-  el.innerHTML = `<table><thead><tr><th>Lead</th><th>Caller</th><th>Phone</th><th>Interested</th><th>Status</th><th>Date</th><th class="hide-sm">Last call</th><th></th></tr></thead><tbody>` +
+  el.innerHTML = `<table><thead><tr><th>Lead</th><th>Caller</th><th>Phone</th><th>Interested</th><th>Location</th><th>Status</th><th>Date</th><th class="hide-sm">Last call</th><th></th></tr></thead><tbody>` +
     rows.map(r => {
       const last = r.lastAttempt; const [lab, cls] = DUE_LABEL[r.dueState] || ['', 'b-wait'];
-      return `<tr class="queue-row${r.dueState === 'scheduled' ? ' tried' : ''}">
+      return `<tr class="queue-row${r.dueState === 'scheduled' || r.triedToday ? ' tried' : ''}">
         <td><div class="driver-name">${esc(r.name)}</div><div class="driver-sub">${rowSub(r)}</div></td>
         <td>${ownerTag(r)}</td>
         <td class="mono" style="font-size:12px;">${esc(r.phone || '-')}</td>
         <td style="font-size:12.5px;">${esc(r.interestType)}${r.interestOutcome !== r.interestType ? `<div class="driver-sub">latest: ${esc(r.interestOutcome)}</div>` : ''}</td>
+        <td style="font-size:12.5px;">${r.location ? esc(r.location) : '<span class="driver-sub">not set</span>'}</td>
         <td><span class="badge ${cls}">${lab}</span></td>
-        <td class="mono" style="font-size:12px;">${r.visitDate ? 'visit ' + shortDate(r.visitDate) : r.callbackDate ? 'call ' + shortDate(r.callbackDate) : 'next ' + shortDate(r.dueDate)}</td>
+        <td class="mono" style="font-size:12px;">${r.visitDate ? 'visit ' + shortDate(r.visitDate) : r.callbackDate ? 'call ' + shortDate(r.callbackDate) : 'no date yet'}${r.triedToday ? '<div class="driver-sub">tried today</div>' : ''}</td>
         <td class="hide-sm" style="font-size:12px; max-width:260px;">${last ? `${esc(last.call_status)}${last.outcome ? ', ' + esc(last.outcome) : ''}<div class="driver-sub">${esc(last.caller)}, ${callTime(last.created_at)}${last.comment ? ': ' + esc(last.comment) : ''}</div>` : ''}</td>
         <td><button class="call-now" onclick="openRow('${esc(r.rowKey)}', 'interested')">Call now</button></td></tr>`;
     }).join('') + '</tbody></table>';
@@ -1724,7 +1733,7 @@ function renderOnboarded() {
   const groups = [['needs-id', 'KDM ID needed', 'c-rose'], ['pending', 'Waiting for rent', 'c-amber'], ['verified', 'Verified', 'c-teal'], [null, 'All onboarded', 'c-blue']];
   document.getElementById('obKpis').innerHTML = groups.map(([g, label, cls]) => {
     const on = (S.obFilter || null) === g;
-    return `<button class="kpi ${cls} ${on ? 'active-filter' : ''}" onclick="S.obFilter=${g ? `'${g}'` : 'null'}; renderOnboarded();"><div class="label">${label}</div><div class="value">${g ? all.filter(e => e.status === g).length : all.length}</div></button>`;
+    return `<button class="kpi ${cls} ${on ? 'active-filter' : ''}" onclick="S.obFilter=${on || !g ? 'null' : `'${g}'`}; renderOnboarded();"><div class="label">${label}</div><div class="value">${g ? all.filter(e => e.status === g).length : all.length}</div></button>`;
   }).join('');
   let rows = S.obFilter ? all.filter(e => e.status === S.obFilter) : all;
   const qv = (document.getElementById('obSearch').value || '').trim().toLowerCase();
@@ -1868,7 +1877,7 @@ function openRow(rowKey, list) {
   S.lastOrder = list === 'rnr' ? (S.rnrOrder || []) : list === 'interested' ? (S.interestedOrder || []) : (S.queueOrder || []); S.lastList = list || 'queue';
   const savedCaller = lsGet('portalCaller');
   const rowNow = ((S.Q || buildQueue(ctx())).all || []).find(r => r.rowKey === rowKey);
-  S.current = { rowKey, form: { caller: rowNow && CALLERS.includes(rowNow.owner) ? rowNow.owner : (CALLERS.includes(savedCaller) ? savedCaller : ''), status: '', outcome: '', reason: '', comeback: '', comment: '', }, msg: '' };
+  S.current = { rowKey, form: { caller: rowNow && CALLERS.includes(rowNow.owner) ? rowNow.owner : (CALLERS.includes(savedCaller) ? savedCaller : ''), status: '', outcome: '', reason: '', location: rowNow && rowNow.location ? rowNow.location : '', comeback: '', comment: '', }, msg: '' };
   renderModal();
   document.getElementById('modal').classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -1999,13 +2008,14 @@ function renderModal() {
       <div class="field"><label for="fStatus">Call status</label><select id="fStatus" onchange="setForm('status', this.value)">${opt(CALL_STATUSES, f.status, 'Choose status')}</select></div>
       ${connected ? `
       <div class="field"><label for="fOutcome">${isSvc ? 'Service feedback' : 'Outcome'}</label><select id="fOutcome" onchange="setForm('outcome', this.value)">${opt(isSvc ? SERVICE_OUTCOMES : row.interested ? FOLLOWUP_OUTCOMES : isCamp ? CAMP_OUTCOMES : isLead ? LEAD_OUTCOMES : OUTCOMES, f.outcome, isSvc ? 'Choose feedback' : 'Choose outcome')}</select></div>
+      ${(isLead || isCamp) && isInterestedOutcome(f.outcome) ? `<div class="field"><label for="fLoc">Location (hub)</label><select id="fLoc" onchange="setForm('location', this.value)"><option value="">Choose hub</option>${LEAD_LOCATIONS.map(x => `<option ${f.location === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>` : ''}
       ${(isLead || isCamp) && f.outcome === ONBOARDED_OUTCOME ? `<div class="field"><label for="fSeg">Onboarded as</label><select id="fSeg" onchange="setForm('reason', this.value)"><option value="">Choose</option>${['Passenger', 'Cargo'].map(x => `<option ${f.reason === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>` : ''}
       ${isSvc || isLead || isCamp ? '' : `<div class="field"><label for="fReason">Main reason (if not driving or not paying)</label><select id="fReason" onchange="setForm('reason', this.value)">${opt(REASONS, f.reason, 'None / not applicable')}</select></div>`}
       ${dateLabel(f.outcome, isCamp || isLead) ? `<div class="field"><label for="fBack">${dateLabel(f.outcome, isCamp || isLead)}${dateRequired(f.outcome) ? '' : ' (optional)'}</label><input type="date" id="fBack" value="${esc(f.comeback)}" min="${S.today}" onchange="setForm('comeback', this.value)"></div>` : ''}
       ` : ''}
       <div class="field full"><label for="fComment">Remark (required)</label><textarea id="fComment" placeholder="${connected ? 'What did the driver say?' : 'e.g. rang twice, no answer'}" oninput="S.current.form.comment=this.value">${esc(f.comment)}</textarea></div>
     </div>
-    <div class="driver-sub" style="font-size:12px; margin-top:4px;">${connected ? ((isCamp || isLead) && f.outcome === ONBOARDED_OUTCOME ? 'Onboarded: moves to the Onboarded tab. Passenger is checked against rent; cargo needs the KDM ID there.' : (isCamp || isLead) && isInterestedOutcome(f.outcome) ? 'Interested: this lead moves to (or stays in) the interested tab. It comes up on the date you set, or every 2nd day without one.' : 'Connected with a remark moves this to Done.') : `Not connected: stays in the list. After ${RNR_MIN_TRIES} unanswered tries over ${RNR_DAYS} days it moves to the RNR tab.`}</div>
+    <div class="driver-sub" style="font-size:12px; margin-top:4px;">${connected ? ((isCamp || isLead) && f.outcome === ONBOARDED_OUTCOME ? 'Onboarded: moves to the Onboarded tab. Passenger is checked against rent; cargo needs the KDM ID there.' : (isCamp || isLead) && isInterestedOutcome(f.outcome) ? 'Interested: this lead moves to (or stays in) the interested tab. With a date it waits under Scheduled until then; without one it stays under Follow-up due.' : 'Connected with a remark moves this to Done.') : `Not connected: stays in the list. After ${RNR_MIN_TRIES} unanswered tries over ${RNR_DAYS} days it moves to the RNR tab.`}</div>
     <div class="form-actions">
       <button class="primary" id="saveBtn" onclick="saveCall()" ${S.tableMissing ? 'disabled' : ''}>Save call</button>
       <span class="status-msg ${cur.msgCls || ''}" id="saveMsg">${esc(cur.msg || '')}</span>
@@ -2021,11 +2031,12 @@ function dateLabel(o, lead) {
   if (o === 'Coming back') return 'Coming back on';
   if (!lead || !o) return '';
   if (o === CAMP_SNOOZE_OUTCOME) return 'Call back on';
-  if (o === "Didn't come, new date") return 'New visit date';
+  if (o === "Didn't come, new date" || o === 'Rescheduled') return 'New visit date';
+  if (o === 'Will visit') return 'Will visit on';
   if (o === 'Visited, joining') return 'Joining on';
   return isInterestedOutcome(o) ? 'Will visit hub on' : '';
 }
-function dateRequired(o) { return o === CAMP_SNOOZE_OUTCOME || o === "Didn't come, new date"; }
+function dateRequired(o) { return o === CAMP_SNOOZE_OUTCOME || o === "Didn't come, new date" || o === 'Rescheduled' || o === 'Will visit'; }
 function setForm(k, v) {
   const f = S.current.form;
   const commentEl = document.getElementById('fComment'); if (commentEl) f.comment = commentEl.value;
@@ -2047,13 +2058,15 @@ async function saveCall() {
   if (f.status === 'Connected' && !f.outcome) return fail(row.items[0].cat === 'svc' ? 'Choose the service feedback.' : 'Choose the outcome.');
   if (!(f.comment || '').trim()) return fail('Write a remark before saving.');
   const leadRow = row.items.some(i => LEAD_CATS.includes(i.cat));
+  if (leadRow && f.status === 'Connected' && isInterestedOutcome(f.outcome) && !LEAD_LOCATIONS.includes(f.location)) return fail('Choose the hub location.');
   if (leadRow && f.outcome === ONBOARDED_OUTCOME && !['Passenger', 'Cargo'].includes(f.reason)) return fail('Choose if they joined passenger or cargo.');
-  if (leadRow && dateRequired(f.outcome) && !f.comeback) return fail(f.outcome === CAMP_SNOOZE_OUTCOME ? 'Pick the call-back date.' : 'Pick the new visit date.');
+  if (leadRow && dateRequired(f.outcome) && !f.comeback) return fail(f.outcome === CAMP_SNOOZE_OUTCOME ? 'Pick the call-back date.' : 'Pick the visit date.');
   const btn = document.getElementById('saveBtn'); btn.disabled = true; btn.textContent = 'Saving…';
   const rec = {
     driver_id: row.driverId, driver_name: row.driverId ? row.name : (row.items[0].cat === 'svc' ? row.items[0].vehicle : row.name), hub: row.hub, phone: row.phone,
     item_keys: row.items.map(i => i.key), item_labels: row.items.map(itemLabel),
-    caller: f.caller, call_status: f.status, outcome: f.outcome || null, reason: f.reason || null,
+    caller: f.caller, call_status: f.status, outcome: f.outcome || null,
+    reason: (leadRow && f.status === 'Connected' && isInterestedOutcome(f.outcome)) ? f.location : (f.reason || null),
     comeback_date: f.comeback || null, comment: (f.comment || '').trim(), done: f.status === 'Connected' && !(leadRow && isInterestedOutcome(f.outcome)),
   };
   const { error } = await sb.from(CALLS_TABLE).insert(rec);
@@ -2370,6 +2383,7 @@ function renderIncoming(focusKey) {
       <div class="field"><label for="iArea">Area or city</label><input type="text" id="iArea" value="${esc(f.area)}" placeholder="e.g. Sector 68, Gurgaon" oninput="incSet('area', this.value)"></div>
       <div class="field"><label>Call taken by</label><div class="seg">${CALLERS.map(c => `<button type="button" class="${f.caller === c ? 'on' : ''}" onclick="incSet('caller','${c}', true)">${c}</button>`).join('')}</div></div>
       <div class="field"><label for="iOutcome">Outcome</label><select id="iOutcome" onchange="incSet('outcome', this.value, true)">${opt(CAMP_OUTCOMES, f.outcome, 'Choose outcome')}</select></div>
+      ${isInterestedOutcome(f.outcome) ? `<div class="field"><label for="iLoc">Location (hub)</label><select id="iLoc" onchange="incSet('loc', this.value)"><option value="">Choose hub</option>${LEAD_LOCATIONS.map(x => `<option ${f.loc === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>` : ''}
       ${f.outcome === ONBOARDED_OUTCOME ? `<div class="field"><label for="iSeg">Onboarded as</label><select id="iSeg" onchange="incSet('seg', this.value)"><option value="">Choose</option>${['Passenger', 'Cargo'].map(x => `<option ${f.seg === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>` : ''}
       ${dateLabel(f.outcome, true) ? `<div class="field"><label for="iBack">${dateLabel(f.outcome, true)}${dateRequired(f.outcome) ? '' : ' (optional)'}</label><input type="date" id="iBack" value="${esc(f.comeback)}" min="${S.today}" onchange="incSet('comeback', this.value)"></div>` : ''}
       <div class="field full"><label for="iRemark">Remark (required)</label><textarea id="iRemark" placeholder="What did they say?" oninput="incSet('remark', this.value)">${esc(f.remark)}</textarea></div>
@@ -2389,6 +2403,7 @@ async function saveIncoming() {
   if (!f.outcome) return fail('Choose the outcome.');
   if (dateRequired(f.outcome) && !f.comeback) return fail('Pick the call-back date.');
   if (f.outcome === ONBOARDED_OUTCOME && !['Passenger', 'Cargo'].includes(f.seg)) return fail('Choose if they joined passenger or cargo.');
+  if (isInterestedOutcome(f.outcome) && !LEAD_LOCATIONS.includes(f.loc)) return fail('Choose the hub location.');
   if (!f.remark.trim()) return fail('Write a remark before saving.');
   m.busy = true; m.msg = 'Saving…'; m.msgCls = ''; renderIncoming();
   const uid = 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -2399,7 +2414,7 @@ async function saveIncoming() {
   const r1 = await sb.from(CALLS_TABLE).insert({ driver_name: name, phone, caller: f.caller, call_status: INCOMING_MARK, done: false,
     item_keys: ['incoming|' + uid], item_labels: ['Incoming lead (' + source + ')'], comment: JSON.stringify(lead) });
   if (r1.error) { m.busy = false; return fail('Not saved: ' + r1.error.message); }
-  const r2 = await sb.from(CALLS_TABLE).insert({ driver_name: name, phone, caller: f.caller, call_status: 'Connected', outcome: f.outcome, comeback_date: f.comeback || null, reason: f.outcome === ONBOARDED_OUTCOME ? f.seg : null,
+  const r2 = await sb.from(CALLS_TABLE).insert({ driver_name: name, phone, caller: f.caller, call_status: 'Connected', outcome: f.outcome, comeback_date: f.comeback || null, reason: f.outcome === ONBOARDED_OUTCOME ? f.seg : isInterestedOutcome(f.outcome) ? f.loc : null,
     item_keys: [`inc|ph:${phone}|${uid}`], item_labels: ['Incoming call (' + source + ')'], comment: f.remark.trim(), done: !isInterestedOutcome(f.outcome) });
   if (r2.error) { m.busy = false; return fail('Lead saved but the call was not: ' + r2.error.message); }
   await loadLogs(); renderAll();
@@ -2420,7 +2435,7 @@ function catLabel(g) {
 }
 function stepDay(n) {
   const d = addDays(S.dailyDay || summaryDefaultDay(S.today), n);
-  if (d >= S.today) return;
+  if (d > S.today) return;
   S.dailyDay = d; renderDaily();
 }
 function dueToday() {
@@ -2438,8 +2453,10 @@ function renderDaily() {
   const day = S.dailyDay || summaryDefaultDay(S.today);
   const ds = daySummary(ctx(), day);
   S.dailySummary = ds;
-  document.getElementById('dailyTitle').textContent = dayLabel(day) + (day === summaryDefaultDay(S.today) ? '' : '');
-  document.getElementById('dailyNext').disabled = addDays(day, 1) >= S.today;
+  document.getElementById('dailyTitle').textContent = (day === S.today ? 'Today so far, ' : '') + dayLabel(day);
+  document.getElementById('dailyNext').disabled = addDays(day, 1) > S.today;
+  document.getElementById('dTodayBtn').classList.toggle('active', day === S.today);
+  document.getElementById('dPrevBtn').classList.toggle('active', day === summaryDefaultDay(S.today));
   const pct = (a, b) => b ? ` <span class="pct-chip">${Math.round(a / b * 100)}%</span>` : '';
   const card = (label, val, foot) => `<div class="total-card"><div class="label">${label}</div><div class="value">${val}</div><div class="foot">${foot}</div></div>`;
   const bars = obj => {
@@ -2483,6 +2500,7 @@ function renderDaily() {
     </div>
     <div class="section grid2">
       <div class="card"><h3>Results that day</h3>
+        ${day > S.ref ? `<div class="driver-sub" style="margin-bottom:8px;">Rent data is only up to ${shortDate(S.ref)}, so payments made ${day === S.today ? 'today' : 'on this day'} show once the next ledger upload is in.</div>` : ''}
         <div class="sub-h" style="margin-top:0;">Drivers who paid rent after a call</div>${people(ds.cameBack, x => `${esc(x.name)} <span class="driver-sub">${esc(x.driverId)}, called ${esc(shortDate(x.calledOn))} by ${esc(x.caller)}</span>`)}
         <div class="sub-h">Leads converted (paid first rent)</div>${people(ds.converted, x => `${esc(x.name || x.phone)} <span class="driver-sub">now ${esc(x.driver)}</span>`)}
         <div class="sub-h">Moved to RNR</div>${people(ds.movedToRnr, x => `${esc(x.name)} <span class="driver-sub">last tried by ${esc(x.caller)}</span>`)}</div>
