@@ -211,7 +211,9 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
 </div>
 
 <div class="view-nav">
-  <button class="view-nav-btn active" id="navLeads" onclick="setQueueMode('leads')">To call - fresh leads <span class="cnt" id="cntLeads">0</span></button>
+  <button class="view-nav-btn active" id="navMeta" onclick="setQueueMode('meta')">To call - fresh leads (Meta) <span class="cnt" id="cntMeta">0</span></button>
+  <button class="view-nav-btn" id="navJobhai" onclick="setQueueMode('jobhai')">To call - fresh leads (Job Hai) <span class="cnt" id="cntJobhai">0</span></button>
+  <button class="view-nav-btn" id="navSocial" onclick="setQueueMode('social')">To call - incoming &amp; social <span class="cnt" id="cntSocial">0</span></button>
   <button class="view-nav-btn" id="navInterested" onclick="setView('interested')">To call - interested leads <span class="cnt" id="cntInterested">0</span></button>
   <button class="view-nav-btn" id="navDrivers" onclick="setQueueMode('drivers')">To call - existing drivers <span class="cnt" id="cntDrivers">0</span></button>
   <button class="view-nav-btn" id="navRnr" onclick="setView('rnr')">RNR <span class="cnt" id="cntRnr">0</span></button>
@@ -284,7 +286,7 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
   <div class="section">
     <div class="section-head">
       <h2>Campaign leads</h2>
-      <div class="filters"><button class="primary" onclick="openAddCampaign()">Add campaign</button></div>
+      <div class="filters"><button class="primary" onclick="openAddCampaign('meta')">Add Meta campaign</button><button class="primary" onclick="openAddCampaign('jobhai')">Add Job Hai campaign</button></div>
     </div>
     <div id="campaignsBody"></div>
   </div>
@@ -467,7 +469,7 @@ function sheetDay(raw) {
 
 // Service_Tracker tab. Columns are found by their header names (VEHICLE NO, then one
 // Due_Date / Done on KM / Done_Date block per service); if the headers can't be found it falls
-// back to the layout the passenger dashboard uses (vehicle in column 1, blocks from column 13).
+// back to the sheet's layout as of Nov 2026 (vehicle in column B, service blocks from column M).
 function parseServiceTracker(rows) {
   rows = rows || [];
   let hi = -1;
@@ -480,7 +482,7 @@ function parseServiceTracker(rows) {
     source = 'headers';
   }
   if (hi < 0 || !doneCols.length) {
-    hi = 0; vCol = 1; doneCols = []; for (let i = 0; i < 10; i++) doneCols.push(13 + i * 3 + 2); source = 'fixed';
+    hi = 0; vCol = 1; doneCols = []; for (let i = 0; i < 10; i++) doneCols.push(12 + i * 3 + 2); source = 'fixed';
   }
   const out = [];
   rows.slice(hi + 1).forEach(r => {
@@ -584,7 +586,7 @@ function parseCampaignSheet(rows, today) {
   const dCol = find(/^date$|created[_\s]?time|^created|timestamp/i);
   const plCol = find(/platform/i);
   const skip = new Set([pCol, nCol, dCol, plCol]);
-  const ignore = /^(id|ad[_\s]?id|ad[_\s]?name|adset[_\s]?id|adset[_\s]?name|campaign[_\s]?id|campaign[_\s]?name|form[_\s]?id|form[_\s]?name|is[_\s]?organic|lead[_\s]?status)$/i;
+  const ignore = /^(#|s\.?\s?no\.?|sr\.?\s?no\.?|id|ad[_\s]?id|ad[_\s]?name|adset[_\s]?id|adset[_\s]?name|campaign[_\s]?id|campaign[_\s]?name|form[_\s]?id|form[_\s]?name|is[_\s]?organic|lead[_\s]?status)$/i;
   const qCols = H.map((h, i) => i).filter(i => !skip.has(i) && H[i] && !ignore.test(H[i]));
   const seen = {};
   rows.slice(hi + 1).forEach((r, k) => {
@@ -608,6 +610,33 @@ function detectSegment(tabName, headers) {
   const cargo = /\b(cargo|delivery|deliveries|logistics?|parcel|loader|goods)\b/.test(t);
   const pass = /\b(auto|passenger|rickshaw|erickshaw|e rickshaw|rapido|sawari|savari)\b/.test(t);
   return cargo && !pass ? 'Cargo' : pass && !cargo ? 'Passenger' : null;
+}
+// Job Hai exports: one Excel sheet per job, e.g. "Job 8613385 (4 Nov 2026)". The lead date is the
+// date in the sheet name; applicants are called before Job Hai's recommended candidates.
+function sheetNameDate(name, today) {
+  const m = String(name || '').match(/(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,})\.?,?\s+(\d{4})/);
+  return m ? leadDay(`${m[1]} ${m[2]} ${m[3]}`, today) : null;
+}
+function parseJobHaiSheet(rows, sheetName, today, uploadDay) {
+  const p = parseCampaignSheet(rows, today);
+  const date = sheetNameDate(sheetName, today) || uploadDay || today;
+  p.leadDate = date; p.dateFromName = !!sheetNameDate(sheetName, today);
+  p.leads.forEach(l => {
+    l.date = date;
+    const src = (l.answers.find(a => /^source$/i.test(a[0])) || [])[1] || '';
+    l.applied = /appl/i.test(src);
+    l.platform = src ? 'Job Hai, ' + src.toLowerCase() : 'Job Hai';
+  });
+  p.applied = p.leads.filter(l => l.applied).length;
+  return p;
+}
+function jobhaiNameFor(date, existing) {
+  const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+date.slice(5, 7) - 1];
+  const base = 'jobhai' + mon + date.slice(2, 4);
+  const taken = new Set((existing || []).map(x => String(x).toLowerCase()));
+  if (!taken.has(base.toLowerCase())) return base;
+  let n = 2; while (taken.has((base + '-' + n).toLowerCase())) n++;
+  return base + '-' + n;
 }
 function campaignNameFor(tabName, today, existing) {
   const word = (String(tabName || '').trim().split(/\s+/)[0] || 'leads').toLowerCase().replace(/[^a-z0-9]/g, '') || 'leads';
@@ -845,7 +874,7 @@ const CAT_RANK = { rent: 3, exit: 2, join: 1 };
 function itemScore(it) {
   if (it.cat === 'svc') return 150;
   if (it.cat === 'lead') return 200;
-  if (it.cat === 'camp') return 190;
+  if (it.cat === 'camp') return 190 + (it.lead && it.lead.applied ? 5 : 0);
   if (it.cat === 'inc') return 195;
   if (it.cat === 'rent') return 300 + it.tier * 10 + Math.min(it.gap, 30);
   if (it.cat === 'exit') return 250;
@@ -1243,7 +1272,7 @@ function leavesFor(driverId, name, ctx) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
-  hashPick, ownerFor, assignOwners, firstCallerIndex, INCOMING_SOURCES, summaryDefaultDay, daySummary, logCat, istTime, detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, FOLLOWUP_OUTCOMES, FOLLOWUP_KEEP, isInterestedOutcome, interestedState, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
+  hashPick, ownerFor, assignOwners, firstCallerIndex, INCOMING_SOURCES, summaryDefaultDay, daySummary, logCat, istTime, sheetNameDate, parseJobHaiSheet, jobhaiNameFor, detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, FOLLOWUP_OUTCOMES, FOLLOWUP_KEEP, isInterestedOutcome, interestedState, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
   buildLeadIndex, campaignStats, rnrInfo, itemPrefix, existingDriver,
   LEAD_OUTCOMES, parseLeadForm, buildPhoneRent, leadOnboarded, phone10,
   SERVICE_OUTCOMES, MASTER_VEHICLES, parseServiceTracker, sheetDay, normReg, driversOnVehicle,
@@ -1277,7 +1306,7 @@ try { sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE
 const S = {
   drivers: {}, sessions: {}, leaves: [], exits: [], logs: [], today: null, ref: null,
   leaveUploadedAt: null, tableMissing: false, loadError: null, services: [], svcError: null, svcSource: null, leads: [], leadError: null, phoneRent: {}, campaigns: [], campTableMissing: false, Q: null, lastOrder: [], cm: null,
-  view: 'queue', queueMode: 'leads', catFilter: null, hub: null, doneCat: null, doneCaller: null, current: null,
+  view: 'queue', queueMode: 'meta', catFilter: null, hub: null, doneCat: null, doneCaller: null, current: null,
 };
 
 function esc(s) { return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -1387,9 +1416,11 @@ async function fetchSheetRows(sheetId, gid) {
 async function loadCampaigns() {
   const list = (S.campaignRows || []).map(r => {
     let meta = {}; try { meta = JSON.parse(r.comment || '{}'); } catch (e) {}
-    return { id: r.id, created_at: r.created_at, name: r.driver_name, sheet_url: meta.sheet_url, sheet_id: meta.sheet_id, gid: meta.gid || '0', tab_name: meta.tab_name, segment: meta.segment };
-  }).filter(c => c.name && c.sheet_id && !(S.removedCampaignIds || new Set()).has(c.id)).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+    return { id: r.id, created_at: r.created_at, name: r.driver_name, kind: meta.kind || 'meta', sheet_url: meta.sheet_url, sheet_id: meta.sheet_id, gid: meta.gid || '0',
+      tab_name: meta.tab_name, segment: meta.segment, file_name: meta.file_name, rows: meta.rows };
+  }).filter(c => c.name && (c.sheet_id || (c.kind === 'jobhai' && c.rows)) && !(S.removedCampaignIds || new Set()).has(c.id)).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
   S.campaigns = await Promise.all(list.map(async cp => {
+    if (cp.kind === 'jobhai') return { ...cp, parsed: parseJobHaiSheet(cp.rows, cp.tab_name, S.today, istDateOf(cp.created_at)), error: null };
     try { return { ...cp, parsed: parseCampaignSheet(await fetchSheetRows(cp.sheet_id, cp.gid), S.today), error: null }; }
     catch (e) { return { ...cp, parsed: null, error: 'Could not read this sheet (' + (e.message || e) + '). Check it is shared as Anyone with the link: Viewer.' }; }
   }));
@@ -1470,6 +1501,21 @@ function setHub(k) { S.hub = k; renderAll(); }
 
 const LEAD_CATS = ['lead', 'camp', 'inc'];
 function isLeadRow(r) { return LEAD_CATS.includes(r.items[0].cat); }
+// Which To call tab a row or a call belongs to: meta / jobhai campaign leads, social (Instagram form
+// and incoming calls), or drivers
+function campaignKind(id) { const c = S.campaigns.find(x => x.id === id); return c && c.kind === 'jobhai' ? 'jobhai' : 'meta'; }
+function rowGroup(r) {
+  const it = r.items[0];
+  if (it.cat === 'lead' || it.cat === 'inc') return 'social';
+  if (it.cat === 'camp') return it.campaign && it.campaign.kind === 'jobhai' ? 'jobhai' : 'meta';
+  return 'drivers';
+}
+function logGroup(l) {
+  const p = String((l.item_keys || [])[0] || '').split('|');
+  if (p[0] === 'lead' || p[0] === 'inc') return 'social';
+  if (p[0] === 'camp') return campaignKind(p[2]);
+  return 'drivers';
+}
 function isLeadLog(l) { return (l.item_keys || []).some(k => /^(lead|camp|inc)\|/.test(k)); }
 function setView(v) {
   S.view = v;
@@ -1477,8 +1523,7 @@ function setView(v) {
     document.getElementById('view' + x[0].toUpperCase() + x.slice(1)).style.display = x === v ? '' : 'none';
     if (x !== 'queue') document.getElementById('nav' + x[0].toUpperCase() + x.slice(1)).classList.toggle('active', x === v);
   });
-  document.getElementById('navLeads').classList.toggle('active', v === 'queue' && S.queueMode === 'leads');
-  document.getElementById('navDrivers').classList.toggle('active', v === 'queue' && S.queueMode === 'drivers');
+  ['meta', 'jobhai', 'social', 'drivers'].forEach(m => document.getElementById('nav' + m[0].toUpperCase() + m.slice(1)).classList.toggle('active', v === 'queue' && S.queueMode === m));
 }
 function setQueueMode(mode) {
   if (S.queueMode !== mode) S.catFilter = null;
@@ -1508,7 +1553,7 @@ function itemLabel(it) {
 }
 
 function allQueueRows() { return (S.Q || buildQueue(ctx())).rows.filter(r => hubOk(r.hub)); }
-function queueRows() { const leads = S.queueMode === 'leads'; return allQueueRows().filter(r => isLeadRow(r) === leads); }
+function queueRows() { return allQueueRows().filter(r => rowGroup(r) === S.queueMode); }
 function rnrRows() { return (S.Q || buildQueue(ctx())).rnr.filter(r => hubOk(r.hub)); }
 function rowSub(r) {
   const it = r.items[0];
@@ -1595,13 +1640,12 @@ function renderRnr() {
 
 function renderQueue() {
   const rows = queueRows();
-  const leads = S.queueMode === 'leads';
+  const mode = S.queueMode, leads = mode !== 'drivers';
   const all = allQueueRows();
-  document.getElementById('cntLeads').textContent = all.filter(isLeadRow).length;
-  document.getElementById('cntDrivers').textContent = all.filter(r => !isLeadRow(r)).length;
-  const logsToday = S.logs.filter(l => istDateOf(l.created_at) === S.today && hubOk(l.hub) && isLeadLog(l) === leads);
+  ['meta', 'jobhai', 'social', 'drivers'].forEach(m => { document.getElementById('cnt' + m[0].toUpperCase() + m.slice(1)).textContent = all.filter(r => rowGroup(r) === m).length; });
+  const logsToday = S.logs.filter(l => istDateOf(l.created_at) === S.today && hubOk(l.hub) && logGroup(l) === mode);
   const conToday = logsToday.filter(l => l.call_status === 'Connected').length;
-  const doneAll = calledItems(ctx()).filter(x => x.done && hubOk(x.hub) && LEAD_CATS.includes(x.cat) === leads).length;
+  const doneAll = calledItems(ctx()).filter(x => x.done && hubOk(x.hub) && logGroup({ item_keys: [x.key] }) === mode).length;
   const byCaller = CALLERS.map(c => `${c} ${logsToday.filter(l => l.caller === c).length}`).join(', ');
   const pct = logsToday.length ? ` <span class="pct-chip">${Math.round(conToday / logsToday.length * 100)}%</span>` : '';
   document.getElementById('summaryRow').innerHTML = `
@@ -1621,18 +1665,23 @@ function renderQueue() {
     ? 'Leads stay until connected with a remark, and drop off once the number pays rent. Leads tried today but not connected drop to the bottom, faded.'
     : 'Calls stay until connected with a remark. Rent calls drop off only if the driver pays. Drivers tried today but not connected drop to the bottom, faded.';
   if (leads) {
-    const camps = S.campaigns.filter(c => c.parsed);
-    kg.style.gridTemplateColumns = window.innerWidth > 1000 ? 'minmax(200px,1fr) 3fr' : '1fr';
-    kg.innerHTML = `
-    <div class="kpi-group"><div class="glabel">Instagram and incoming</div><div class="kpis" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));">
-      ${card('lead', null, 'New lead - Instagram', 'until called or onboarded', 'c-lead')}
-      ${card('inc', null, 'Incoming calls', 'call-backs booked and due', 'c-inc')}
-      <button class="kpi c-inc" style="border-style:dashed; justify-content:center;" onclick="openIncoming()"><div class="value" style="font-size:22px; margin-top:0;">+</div><div class="foot" style="color:var(--ink);">Add incoming call</div></button>
-    </div></div>
-    <div class="kpi-group"><div class="glabel">Campaigns</div><div class="kpis" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));">
-      ${card('camp', null, 'All campaigns', camps.length + ' campaign' + (camps.length === 1 ? '' : 's'), 'c-camp')}
-      ${camps.slice().reverse().map(c => card('camp', null, c.name, c.segment || '', 'c-camp', c.id)).join('')}
-    </div></div>`;
+    const camps = S.campaigns.filter(c => c.parsed && (c.kind === 'jobhai' ? 'jobhai' : 'meta') === mode);
+    const grid = 'grid-template-columns:repeat(auto-fill,minmax(190px,1fr));';
+    kg.style.gridTemplateColumns = '1fr';
+    if (mode === 'social') {
+      kg.innerHTML = `<div class="kpi-group"><div class="glabel">Instagram form and incoming calls</div><div class="kpis" style="${grid}">
+        ${card('lead', null, 'New lead - Instagram', 'until called or onboarded', 'c-lead')}
+        ${card('inc', null, 'Incoming calls', 'call-backs booked and due', 'c-inc')}
+        <button class="kpi c-inc" style="border-style:dashed; justify-content:center;" onclick="openIncoming()"><div class="value" style="font-size:22px; margin-top:0;">+</div><div class="foot" style="color:var(--ink);">Add incoming call</div></button>
+      </div></div>`;
+    } else {
+      const label = mode === 'jobhai' ? 'Job Hai' : 'Meta';
+      kg.innerHTML = `<div class="kpi-group"><div class="glabel">${label} campaigns${mode === 'jobhai' ? ' (applicants are listed before recommended candidates)' : ''}</div><div class="kpis" style="${grid}">
+        ${card('camp', null, 'All ' + label + ' campaigns', camps.length + ' campaign' + (camps.length === 1 ? '' : 's'), 'c-camp')}
+        ${camps.slice().reverse().map(c => card('camp', null, c.name, c.kind === 'jobhai' ? (c.tab_name || 'Job Hai') : (c.segment || ''), 'c-camp', c.id)).join('')}
+        <button class="kpi c-camp" style="border-style:dashed; justify-content:center;" onclick="openAddCampaign('${mode}')"><div class="value" style="font-size:22px; margin-top:0;">+</div><div class="foot" style="color:var(--ink);">Add ${label} campaign</div></button>
+      </div></div>`;
+    }
     renderQueueTable();
     return;
   }
@@ -1672,7 +1721,7 @@ function renderQueueTable() {
   if (qv) rows = rows.filter(r => [r.name, r.driverId, r.phone].some(x => String(x || '').toLowerCase().includes(qv)));
   document.getElementById('queueTitle').innerHTML = S.catFilter
     ? `Call list: ${esc(S.catFilter.campaign ? campaignNameById(S.catFilter.campaign) : itemLabel(S.catFilter))} <button class="filter-btn" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="S.catFilter=null; renderQueue();">Show all</button>`
-    : (S.queueMode === 'leads' ? 'Fresh leads to call' : 'Existing drivers to call');
+    : ({ meta: 'Fresh Meta leads to call', jobhai: 'Fresh Job Hai leads to call', social: 'Instagram and incoming leads to call', drivers: 'Existing drivers to call' }[S.queueMode]);
   S.queueOrder = rows.map(r => r.rowKey);
   const el = document.getElementById('queueTable');
   if (!rows.length) {
@@ -1742,7 +1791,7 @@ function renderModal() {
     const it = campIt, l = it.lead, cp = it.campaign;
     const inLedger = S.phoneRent[l.phone];
     svcHtml += `<div class="facts">
-      ${[['Campaign', cp.name], ['Segment', cp.segment || '-'], ['Lead came in', l.date ? shortDate(l.date) : 'date not in sheet'], ['Platform', l.platform || '-'], ['Phone', l.phone], ['Sheet row', String(l.rowNum)]]
+      ${[['Campaign', cp.name], ['Segment', cp.segment || '-'], ['Lead came in', l.date ? shortDate(l.date) : 'date not in sheet'], ['Source', l.platform || '-'], ['Phone', l.phone], ['Sheet row', String(l.rowNum)]]
         .map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('')}</div>
       ${l.answers.length ? `<div class="sub-h">What they answered</div><div class="qa">${l.answers.map(([q2, a]) => `<div class="q">${esc(q2)}</div><div>${esc(a)}</div>`).join('')}</div>` : ''}
       ${inLedger ? `<div class="banner warn">This number is in the ledger as ${esc(inLedger.driver)}. It counts as converted once they pay rent after the lead date.</div>` : ''}`;
@@ -1897,7 +1946,7 @@ function renderCampaigns() {
     S.campaigns.slice().reverse().map(cp => {
       if (!cp.parsed) return `<tr><td><div class="driver-name">${esc(cp.name)}</div><div class="driver-sub">${esc(cp.segment || '')}</div></td><td colspan="8" style="color:var(--rose); font-size:12.5px;">${esc(cp.error)}</td><td style="white-space:nowrap;"><button class="filter-btn" onclick="openCampaignSummary('${cp.id}')">Summary</button> <button class="filter-btn" onclick="removeCampaign('${cp.id}')">Remove</button></td></tr>`;
       const st = campStatsFor(cp);
-      return `<tr><td><div class="driver-name">${esc(cp.name)}</div><div class="driver-sub">${esc(cp.segment || '')}${cp.tab_name ? ', tab ' + esc(cp.tab_name) : ''}</div></td>
+      return `<tr><td><div class="driver-name">${esc(cp.name)}</div><div class="driver-sub">${cp.kind === 'jobhai' ? 'Job Hai, sheet ' + esc(cp.tab_name || '') : esc(cp.segment || '') + (cp.tab_name ? ', tab ' + esc(cp.tab_name) : '')}</div></td>
         <td class="hide-sm mono" style="font-size:12px;">${shortDate(istDateOf(cp.created_at))}</td>
         <td class="num">${st.callable}</td><td class="num">${st.fresh}</td><td class="num hide-sm">${st.tried}</td><td class="num hide-sm">${st.rnr}</td>
         <td class="num">${st.connected}</td><td class="num">${st.interested}</td><td class="num"><b>${st.converted}</b></td>
@@ -1919,7 +1968,7 @@ async function removeCampaign(id) {
   if (S.catFilter && S.catFilter.campaign === id) S.catFilter = null;
   await loadLogs(); await loadCampaigns(); renderAll();
 }
-function showCampaignCalls(id) { S.queueMode = 'leads'; S.catFilter = { cat: 'camp', tier: null, campaign: id }; setView('queue'); renderQueue(); }
+function showCampaignCalls(id) { S.queueMode = campaignKind(id); S.catFilter = { cat: 'camp', tier: null, campaign: id }; setView('queue'); renderQueue(); }
 function closeCModal() { S.cm = null; document.getElementById('cmodal').classList.remove('open'); document.body.style.overflow = ''; }
 function openCModal() { document.getElementById('cmodal').classList.add('open'); document.body.style.overflow = 'hidden'; }
 
@@ -1932,9 +1981,37 @@ async function listSheetTabs(sheetId) {
   if (!res.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + res.status));
   return (j.sheets || []).map(x => x.properties).sort((a, b) => a.index - b.index).map(p => ({ gid: String(p.sheetId), title: p.title }));
 }
-function openAddCampaign() {
-  S.cm = { mode: 'add', url: '', tabs: null, msg: '', busy: false };
+function openAddCampaign(source) {
+  S.cm = { mode: 'add', source: source === 'jobhai' ? 'jobhai' : 'meta', url: '', tabs: null, msg: '', busy: false };
   renderAddCampaign(); openCModal();
+}
+function cmSource(src) { S.cm = { mode: 'add', source: src, url: '', tabs: null, msg: '', busy: false }; renderAddCampaign(); }
+// Job Hai sends an Excel file. It is read in the browser (SheetJS, loaded only when needed) and each
+// sheet is stored with the campaign, since there is no live sheet to read later.
+const XLSX_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+function loadXlsx() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  return new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = XLSX_SRC; sc.onload = () => window.XLSX ? res(window.XLSX) : rej(new Error('Excel reader did not load')); sc.onerror = () => rej(new Error('could not load the Excel reader, check the internet connection')); document.head.appendChild(sc); });
+}
+async function onJobhaiFile(input) {
+  const m = S.cm; const file = input.files && input.files[0]; if (!file) return;
+  m.busy = true; m.msg = 'Reading the file…'; m.msgCls = ''; m.tabs = null; m.fileName = file.name; renderAddCampaign();
+  try {
+    const X = await loadXlsx();
+    const wb = X.read(await file.arrayBuffer(), { type: 'array' });
+    m.tabs = wb.SheetNames.map(name => {
+      const rows = X.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' })
+        .map(r => r.map(v => v === null || v === undefined ? '' : String(v).trim()))
+        .filter(r => r.some(v => v !== ''));
+      const parsed = parseJobHaiSheet(rows, name, S.today, S.today);
+      const phones = new Set(parsed.leads.map(l => l.phone));
+      const already = S.campaigns.find(c => c.kind === 'jobhai' && c.tab_name === name && c.parsed && c.parsed.leads.length === parsed.leads.length && c.parsed.leads.every(l => phones.has(l.phone))) || null;
+      return { title: name, gid: null, rows, parsed, already, segment: 'Passenger', include: !!(parsed.headerFound && parsed.leads.length && !already), name: '', nameEdited: false, error: parsed.headerFound ? null : 'No phone column, skipped.' };
+    });
+    m.tabs.forEach((t, i) => { t.name = jobhaiNameFor(t.parsed.leadDate, takenNames(i)); });
+    m.msg = '';
+  } catch (e) { m.msg = 'Could not read the file: ' + (e.message || e); m.msgCls = 'err'; }
+  m.busy = false; renderAddCampaign();
 }
 function takenNames(exceptIdx) {
   return S.campaigns.map(c => c.name).concat((S.cm.tabs || []).filter((t, i) => i !== exceptIdx && t.include).map(t => t.name));
@@ -1969,10 +2046,26 @@ async function findTabs() {
 }
 function renderAddCampaign(focusKey) {
   const m = S.cm;
-  document.getElementById('cTitle').textContent = 'Add campaign';
-  document.getElementById('cSub').textContent = 'Paste the lead sheet link. Each tab with leads becomes its own campaign.';
+  const jh = m.source === 'jobhai';
+  document.getElementById('cTitle').textContent = jh ? 'Add Job Hai campaign' : 'Add Meta campaign';
+  document.getElementById('cSub').textContent = jh ? 'Upload the Excel file from Job Hai. Each sheet with candidates becomes its own campaign.' : 'Paste the lead sheet link. Each tab with leads becomes its own campaign.';
+  const toggle = `<div class="seg" style="margin-bottom:14px;"><button type="button" class="${jh ? '' : 'on'}" onclick="cmSource('meta')">Meta lead sheet (link)</button><button type="button" class="${jh ? 'on' : ''}" onclick="cmSource('jobhai')">Job Hai Excel file</button></div>`;
   let tabsHtml = '';
-  if (m.tabs) {
+  if (m.tabs && jh) {
+    tabsHtml = `<div class="tbl-wrap" style="margin-top:12px;"><div class="tbl-scroll"><table><thead><tr><th></th><th>Sheet</th><th>Lead date</th><th class="num">Rows</th><th class="num">Valid</th><th class="num">Applied</th><th class="num">Invalid</th><th class="num">Repeated</th><th>Campaign name</th></tr></thead><tbody>
+      ${m.tabs.map((t, i) => {
+        const p = t.parsed, usable = p && p.headerFound && p.leads.length && !t.already;
+        const note = t.already ? `<div class="driver-sub">already added as ${esc(t.already.name)}</div>` : t.error ? `<div class="driver-sub" style="color:var(--rose);">${esc(t.error)}</div>` : (p && !p.leads.length ? '<div class="driver-sub">no valid numbers</div>' : '');
+        return `<tr${usable ? '' : ' style="opacity:0.6;"'}>
+          <td><input type="checkbox" ${t.include ? 'checked' : ''} ${usable ? '' : 'disabled'} onchange="S.cm.tabs[${i}].include=this.checked; renderAddCampaign();" aria-label="Add this sheet"></td>
+          <td><div class="driver-name">${esc(t.title)}</div>${note}</td>
+          <td class="mono" style="font-size:12px;">${p ? shortDate(p.leadDate) + (p.dateFromName ? '' : '<div class="driver-sub">no date in sheet name, using today</div>') : '-'}</td>
+          <td class="num">${p ? p.dataRows : '-'}</td><td class="num">${p ? p.leads.length : '-'}</td><td class="num">${p ? p.applied : '-'}</td><td class="num">${p ? p.invalid.length : '-'}</td><td class="num">${p ? p.dupWithin.length : '-'}</td>
+          <td>${usable ? `<input type="text" id="name-${i}" value="${esc(t.name)}" oninput="tabSet(${i}, 'name', this.value)" style="width:150px; border:1.5px solid #c7cac4; border-radius:8px; padding:6px 8px;">` : '-'}</td></tr>`;
+      }).join('')}</tbody></table></div></div>
+      <div class="note" style="margin-top:8px;">All Job Hai campaigns are Passenger. Numbers that appear in more than one sheet, or in earlier lists, are shown as duplicates in the summary after adding and are called only once.</div>`;
+  }
+  if (m.tabs && !jh) {
     const notShared = m.tabs.length && m.tabs.every(t => t.error && /not shared/.test(t.error));
     tabsHtml = notShared ? `<div class="banner err" style="margin-top:12px;">The sheet is not shared. In the sheet, click Share and set General access to Anyone with the link: Viewer, then click Find tabs again.</div>` :
       `${m.listed ? '' : `<div class="banner warn" style="margin-top:12px;">${m.listErr ? 'Could not list the tabs (' + esc(m.listErr) + '). ' : ''}Only the tab in your link was read${SHEETS_API_KEY ? '' : ' (finding every tab needs the Google API key set up)'}. Type its name below, or paste each tab's link separately.</div>`}
@@ -1991,7 +2084,16 @@ function renderAddCampaign(focusKey) {
       ${m.tabs.some(t => t.include && !t.segment) ? '<div class="note" style="margin-top:8px; color:var(--rose);">Could not tell if a tab is cargo or passenger from its name and questions. Pick the segment for the tabs marked in red.</div>' : ''}`;
   }
   const n = (m.tabs || []).filter(t => t.include).length;
-  document.getElementById('cBody').innerHTML = `
+  document.getElementById('cBody').innerHTML = toggle + (jh ? `
+    <div class="form-grid">
+      <div class="field full"><label for="cFile">Job Hai Excel file</label><input type="file" id="cFile" accept=".xlsx,.xls" onchange="onJobhaiFile(this)" ${m.busy ? 'disabled' : ''}>
+        <div class="hint">${m.fileName ? 'Read: ' + esc(m.fileName) + '. ' : ''}Lead date comes from the date in each sheet's name, e.g. "Job 8613385 (4 Nov 2026)". Names are jobhai + month + year; you can change them.</div></div>
+    </div>
+    ${tabsHtml}
+    <div class="form-actions">
+      ${m.tabs ? `<button class="primary" onclick="saveCampaigns()" ${m.busy || !n ? 'disabled' : ''}>Add ${n} campaign${n === 1 ? '' : 's'}</button>` : ''}
+      <span class="status-msg ${m.msgCls || ''}">${esc(m.msg || '')}</span>
+    </div>` : `
     <div class="form-grid">
       <div class="field full"><label for="cUrl">Sheet link</label><input type="url" id="cUrl" value="${esc(m.url)}" placeholder="https://docs.google.com/spreadsheets/d/..." oninput="S.cm.url=this.value">
         <div class="hint">The sheet must be shared as Anyone with the link: Viewer. Campaign names are tab name + month + year, e.g. cargoOct26; you can change them.</div></div>
@@ -2001,7 +2103,7 @@ function renderAddCampaign(focusKey) {
       <button class="ghost" onclick="findTabs()" ${m.busy ? 'disabled' : ''}>Find tabs</button>
       ${m.tabs ? `<button class="primary" onclick="saveCampaigns()" ${m.busy || !n ? 'disabled' : ''}>Add ${n} campaign${n === 1 ? '' : 's'}</button>` : ''}
       <span class="status-msg ${m.msgCls || ''}">${esc(m.msg || '')}</span>
-    </div>`;
+    </div>`);
   if (focusKey) { const el = document.getElementById(focusKey); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
 }
 async function saveCampaigns() {
@@ -2022,7 +2124,9 @@ async function saveCampaigns() {
     const name = t.name.trim();
     const { error } = await sb.from(CALLS_TABLE).insert({ driver_name: name, caller: CAMPAIGN_CALLER, call_status: CAMPAIGN_MARK, done: false,
       item_keys: ['campaign|' + name], item_labels: ['Campaign: ' + name],
-      comment: JSON.stringify({ sheet_url: `https://docs.google.com/spreadsheets/d/${m.ref.id}/edit#gid=${t.gid}`, sheet_id: m.ref.id, gid: String(t.gid), tab_name: t.title.trim(), segment: t.segment }) });
+      comment: JSON.stringify(m.source === 'jobhai'
+        ? { kind: 'jobhai', tab_name: t.title, file_name: m.fileName || '', segment: 'Passenger', rows: t.rows }
+        : { sheet_url: `https://docs.google.com/spreadsheets/d/${m.ref.id}/edit#gid=${t.gid}`, sheet_id: m.ref.id, gid: String(t.gid), tab_name: t.title.trim(), segment: t.segment }) });
     if (error) { m.busy = false; return fail(`Saved ${added.length} of ${tabs.length}. ${name} not saved: ${error.message}`); }
     added.push(name);
   }
@@ -2056,12 +2160,12 @@ function campaignSummaryHtml(cp) {
     </div>
     ${outs.length ? `<div class="sub-h">What leads said</div><div class="tbl-wrap"><table class="hist"><tbody>${outs.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v}</td></tr>`).join('')}</tbody></table></div>` : ''}
     <div class="form-actions"><button class="primary" onclick="closeCModal(); showCampaignCalls('${cp.id}')">Show calls for ${esc(cp.name)}</button>
-      <a class="filter-btn" style="text-decoration:none;" href="${esc(cp.sheet_url)}" target="_blank" rel="noopener">Open sheet</a></div>`;
+      ${cp.sheet_url ? `<a class="filter-btn" style="text-decoration:none;" href="${esc(cp.sheet_url)}" target="_blank" rel="noopener">Open sheet</a>` : ''}</div>`;
 }
 function renderCampaignSummary() {
   const cps = (S.cm.ids || []).map(id => S.campaigns.find(c => c.id === id)).filter(Boolean);
   if (!cps.length) return closeCModal();
-  const sub = cp => `${cp.segment || ''} campaign, added ${shortDate(istDateOf(cp.created_at))}${cp.tab_name ? ', tab ' + cp.tab_name : ''}`;
+  const sub = cp => cp.kind === 'jobhai' ? `Job Hai, Passenger, sheet ${cp.tab_name || ''}, leads dated ${cp.parsed ? shortDate(cp.parsed.leadDate) : '-'}, added ${shortDate(istDateOf(cp.created_at))}` : `${cp.segment || ''} campaign, added ${shortDate(istDateOf(cp.created_at))}${cp.tab_name ? ', tab ' + cp.tab_name : ''}`;
   if (cps.length === 1) {
     document.getElementById('cTitle').textContent = cps[0].name;
     document.getElementById('cSub').textContent = sub(cps[0]);
