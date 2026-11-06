@@ -910,6 +910,13 @@ function buildQueue(ctx) {
   const closes = (l, cat) => l.done && !(['camp', 'inc', 'lead'].includes(cat) && isInterestedOutcome(l.outcome));
   (ctx.logs || []).forEach(l => (l.item_keys || []).forEach(k => { const cat = k.split('|')[0]; if (/^(camp|inc|lead)\|ph:/.test(k) && closes(l, cat)) doneLeadPhones.add(k.split('|')[1]); }));
   const open = items.filter(it => !(byItem[it.key] || []).some(l => closes(l, it.cat)) && !(['camp', 'inc', 'lead'].includes(it.cat) && doneLeadPhones.has('ph:' + it.phone)));
+  // A lead is one person per phone number: calls made on that number from any list (Instagram,
+  // another campaign, an incoming call) count for its tries, RNR and interested stage.
+  const leadLogsByPhone = {};
+  (ctx.logs || []).forEach(l => (l.item_keys || []).forEach(k => {
+    const m = k.match(/^(?:lead|camp|inc)\|ph:(\d{10})\|/); if (!m) return;
+    const arr = leadLogsByPhone[m[1]] || (leadLogsByPhone[m[1]] = []); if (!arr.includes(l)) arr.push(l);
+  }));
   const rows = {};
   open.forEach(it => {
     const rk = ['lead', 'camp', 'inc'].includes(it.cat) ? `lead:${it.phone}` : it.cat === 'svc' ? `svc:${it.driverId || 'veh'}:${it.vehicle}:${it.anchor}:${it.tier}`
@@ -917,6 +924,7 @@ function buildQueue(ctx) {
     const r = rows[rk] || (rows[rk] = { rowKey: rk, driverId: it.driverId, name: null, items: [], attempts: [] });
     r.items.push(it);
     (byItem[it.key] || []).forEach(l => { if (!r.attempts.includes(l)) r.attempts.push(l); });
+    if (['lead', 'camp', 'inc'].includes(it.cat)) (leadLogsByPhone[it.phone] || []).forEach(l => { if (!r.attempts.includes(l)) r.attempts.push(l); });
   });
   const list = Object.values(rows).map(r => {
     const d = r.driverId ? ctx.drivers[r.driverId] : null;
@@ -934,7 +942,9 @@ function buildQueue(ctx) {
   list.sort((a, b) => (a.triedToday - b.triedToday) || (b.score - a.score) || String(a.openSince || '').localeCompare(String(b.openSince || '')) || String(a.name).localeCompare(String(b.name)));
   assignOwners(list, ctx.logs);
   list.forEach(r => {
-    Object.assign(r, rnrInfo(r.items.map(i => itemPrefix(i.key)), ctx.logs, ctx.today));
+    const pfx = new Set(r.items.map(i => itemPrefix(i.key)));
+    if (['lead', 'camp', 'inc'].includes(r.items[0].cat)) r.attempts.forEach(l => (l.item_keys || []).forEach(k => { if (/^(lead|camp|inc)\|ph:/.test(k)) pfx.add(itemPrefix(k)); }));
+    Object.assign(r, rnrInfo(Array.from(pfx), ctx.logs, ctx.today));
     if (['lead', 'camp', 'inc'].includes(r.items[0].cat)) Object.assign(r, interestedState(r, ctx.today));
   });
   const interested = list.filter(r => r.interested && !r.rnr);
