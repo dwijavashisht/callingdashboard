@@ -1476,8 +1476,8 @@ async function loadData() {
 // Service_Tracker tab of the maintenance workbook, read the same way the passenger dashboard reads it
 async function loadServices() {
   try {
-    const url = `https://docs.google.com/spreadsheets/d/${MAINTENANCE_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('Service_Tracker')}`;
-    const res = await fetch(url);
+    const url = `https://docs.google.com/spreadsheets/d/${MAINTENANCE_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('Service_Tracker')}&_=${Date.now()}`;
+    const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const parsed = parseServiceTracker(parseCSVText(await res.text()));
     S.services = parsed.vehicles; S.svcSource = parsed.source; S.svcError = null;
@@ -1489,8 +1489,8 @@ async function loadServices() {
 // Instagram lead form responses (Google Form), read live like the service tracker
 async function loadLeads() {
   try {
-    const url = `https://docs.google.com/spreadsheets/d/${LEAD_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${LEAD_SHEET_GID}`;
-    const res = await fetch(url);
+    const url = `https://docs.google.com/spreadsheets/d/${LEAD_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${LEAD_SHEET_GID}&_=${Date.now()}`;
+    const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     S.leads = parseLeadForm(parseCSVText(await res.text())); S.leadError = null;
   } catch (e) {
@@ -1518,7 +1518,7 @@ function sheetRef(url) {
   return id ? { id, gid } : null;
 }
 async function fetchSheetRows(sheetId, gid) {
-  const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`);
+  const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}&_=${Date.now()}`, { cache: 'no-store' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const text = await res.text();
   if (/^\s*<(!doctype|html)/i.test(text)) throw new Error('the sheet is not shared');
@@ -1539,6 +1539,7 @@ async function loadCampaigns() {
     : 'meta|' + cp.sheet_id + '|' + cp.gid;
   S.hiddenDuplicateCampaigns = 0;
   const uniq = list.filter(cp => { const k = sig(cp); if (seenCamp.has(k)) { S.hiddenDuplicateCampaigns++; return false; } seenCamp.add(k); return true; });
+  S.sheetsReadAt = new Date().toISOString();
   S.campaigns = await Promise.all(uniq.map(async cp => {
     if (cp.kind === 'jobhai') return { ...cp, parsed: parseJobHaiSheet(cp.rows, cp.tab_name, S.today, istDateOf(cp.created_at)), error: null };
     try { return { ...cp, parsed: parseCampaignSheet(await fetchSheetRows(cp.sheet_id, cp.gid), S.today), error: null }; }
@@ -2139,7 +2140,7 @@ function renderCampaigns() {
         <td class="num">${st.callable}</td><td class="num">${st.fresh}</td><td class="num hide-sm">${st.tried}</td><td class="num hide-sm">${st.rnr}</td>
         <td class="num">${st.connected}</td><td class="num">${st.interested}</td><td class="num"><b>${st.converted}</b></td>
         <td style="white-space:nowrap;"><button class="filter-btn" onclick="openCampaignSummary('${cp.id}')">Summary</button> <button class="filter-btn" onclick="showCampaignCalls('${cp.id}')">Calls</button> <button class="filter-btn" onclick="removeCampaign('${cp.id}')">Remove</button></td></tr>`;
-    }).join('') + '</tbody></table></div></div><div class="note" style="margin-top:8px;">Leads = new numbers to call, after removing invalid numbers, duplicates and existing Kadam drivers. Converted = the number paid rent on or after the lead date.' + (S.hiddenDuplicateCampaigns ? ` ${S.hiddenDuplicateCampaigns} repeated upload${S.hiddenDuplicateCampaigns === 1 ? '' : 's'} of the same sheet ${S.hiddenDuplicateCampaigns === 1 ? 'is' : 'are'} hidden.` : '') + '</div>';
+    }).join('') + '</tbody></table></div></div><div class="note" style="margin-top:8px;">Leads = new numbers to call, after removing invalid numbers, duplicates and existing Kadam drivers. Converted = the number paid rent on or after the lead date.' + (S.sheetsReadAt ? ` Meta sheets last read at ${callTime(S.sheetsReadAt)}; they are re-read every 5 minutes.` : '') + (S.hiddenDuplicateCampaigns ? ` ${S.hiddenDuplicateCampaigns} repeated upload${S.hiddenDuplicateCampaigns === 1 ? '' : 's'} of the same sheet ${S.hiddenDuplicateCampaigns === 1 ? 'is' : 'are'} hidden.` : '') + '</div>';
 }
 // Removing adds a "Campaign removed" entry; the campaign and its open lead calls disappear.
 // Calls already made stay in Done and in each number's history, and a closed lead is not called
@@ -2684,6 +2685,18 @@ function renderImpact() {
 
 // ---------- start ----------
 refreshAll(false);
+// Lead sheets (Meta campaigns and the Instagram form) get new rows during the day: re-read them
+// every 5 minutes so new leads show up without reloading the page.
+async function refreshLeadSheets() {
+  if (!sb) return;
+  try {
+    await loadLeads(); await loadCampaigns();
+    if (!S.current && !S.cm) renderAll();
+    else { S.leadIndex = buildLeadIndex({ leads: S.leads, campaigns: S.campaigns.filter(c => c.parsed), incoming: S.incoming || [] }); S.Q = buildQueue(ctx()); renderQueue(); renderInterested(); renderOnboarded(); renderRnr(); renderCampaigns(); }
+  } catch (e) {}
+}
+setInterval(refreshLeadSheets, 5 * 60000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.sheetsReadAt && Date.now() - Date.parse(S.sheetsReadAt) > 5 * 60000) refreshLeadSheets(); });
 setInterval(async () => { if (!sb || S.tableMissing) return; try { await loadLogs(); if (!S.current && !S.cm) renderAll(); else { S.Q = buildQueue(ctx()); renderQueue(); renderInterested(); renderOnboarded(); renderRnr(); renderCampaigns(); renderDone(); renderImpact(); } } catch (e) {} }, 60000);
 </script>
 </body>
