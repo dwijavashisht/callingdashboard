@@ -373,15 +373,21 @@ const CAMP_OUTCOMES = ['Interested, coming to hub', 'Interested, call back later
 const INCOMING_SOURCES = ['Auto branding', 'Instagram', 'Facebook', 'WhatsApp', 'Referral', 'Walk-in', 'Other'];
 const CAMP_SNOOZE_OUTCOME = 'Interested, call back later';      // stays open, returns on the call-back date
 // Interested leads stay open in the interested tab until they pay rent or a follow-up closes them.
-const FOLLOWUP_OUTCOMES = ['Will visit', 'Rescheduled', 'Visited, joining', 'Visited, not joining', "Didn't come, new date", "Didn't come, not interested", 'Still interested', 'Already working in Kadam', 'Onboarded'];
+const FOLLOWUP_OUTCOMES = ['Will visit', 'Rescheduled', 'Visited, joining', 'In process', 'Visited, not joining', "Didn't come, new date", "Didn't come, not interested", 'Still interested', 'Already working in Kadam', 'Onboarded'];
 // "Onboarded" is marked by the caller with a segment (saved in the call's reason field). Passenger
 // is checked against rent paid; cargo needs the driver's KDM ID entered by the caller.
 const ONBOARDED_OUTCOME = 'Onboarded';
+const IN_PROCESS_OUTCOME = 'In process';
+const VISITED_OUTCOMES = ['Visited, joining', 'Visited, not joining'];
+const CARGO_CLIENTS = ['Delhivery', 'Blinkit', 'Porter', 'Other'];   // asked with "In process" for cargo hubs
+// Location label for the WhatsApp list: "Passenger - Rajeev Chowk (33)" -> "Rajeev Chowk"
+function shortLocation(loc) { return String(loc || '').replace(/^(Passenger|Cargo)\s*-\s*/, '').replace(/\s*\(\d+\)\s*$/, '').trim(); }
+function clientOf(l) { const x = (l.item_labels || []).find(s => /^Client:/.test(s || '')); return x ? x.replace(/^Client:\s*/, '') : null; }
 // Hub an interested lead would join. Saved in the call's reason field with interested outcomes.
 const LEAD_LOCATIONS = ['Passenger - Wazirabad (52)', 'Passenger - Rajeev Chowk (33)', 'Passenger - Hero Honda (68)',
   'Cargo - Nilothi', 'Cargo - Saket', 'Cargo - Wazirabad', 'Cargo - Noida', 'Cargo - Ali Village', 'Cargo - Ghazipur', 'Cargo - Ashok Vihar / Shalimar Bagh'];
 function normKdm(v) { const t = String(v || '').trim().toUpperCase().replace(/\s+/g, ''); const d = t.replace(/^KDM/, ''); return /^\d{1,7}$/.test(d) ? 'KDM' + d.padStart(7, '0') : null; }
-const FOLLOWUP_KEEP = ['Will visit', 'Rescheduled', 'Visited, joining', "Didn't come, new date", 'Still interested'];   // these keep the lead in the interested tab
+const FOLLOWUP_KEEP = ['Will visit', 'Rescheduled', 'Visited, joining', 'In process', "Didn't come, new date", 'Still interested'];   // these keep the lead in the interested tab
 function isInterestedOutcome(o) { return /^interested/i.test(o || '') || FOLLOWUP_KEEP.includes(o); }
 const CAMP_DATE_OUTCOMES = ['Interested, coming to hub', 'Interested, call back later'];
 const LEAD_OUTCOMES = ['Interested in Passenger', 'Interested in Cargo', 'Not Interested', 'Already working in Kadam', 'Onboarded'];
@@ -1123,17 +1129,25 @@ function daySummary(ctx, date) {
   const day = all.filter(l => istDateOf(l.created_at) === date);
   const isLead = l => ['lead', 'camp', 'inc'].includes(logCat(l).cat);
   const who = l => l.driver_id || l.phone || (l.item_keys || []).map(itemPrefix).join(',');
+  const isInt = l => l.call_status === 'Connected' && isInterestedOutcome(l.outcome) && !VISITED_OUTCOMES.includes(l.outcome) && l.outcome !== IN_PROCESS_OUTCOME;
+  const isVisit = l => l.call_status === 'Connected' && VISITED_OUTCOMES.includes(l.outcome);
+  const isOnb = l => l.call_status === 'Connected' && l.outcome === ONBOARDED_OUTCOME;
+  const isProc = l => l.call_status === 'Connected' && l.outcome === IN_PROCESS_OUTCOME;
+  const procItem = l => { const loc = l.reason || ''; return { name: l.driver_name || '', phone: l.phone || '', location: shortLocation(loc),
+    label: /^Cargo/.test(loc) ? (clientOf(l) || 'Cargo') : 'Passenger' }; };
   const block = list => ({ calls: list.length, people: new Set(list.map(who)).size,
-    connected: list.filter(l => l.call_status === 'Connected').length, closed: list.filter(l => l.done).length });
+    connected: list.filter(l => l.call_status === 'Connected').length, interested: list.filter(isInt).length, closed: list.filter(l => l.done).length,
+    hubVisits: list.filter(isVisit).length, onboarded: list.filter(isOnb).length, inProcess: list.filter(isProc).map(procItem) });
   const out = { date, total: block(day), leads: block(day.filter(isLead)), drivers: block(day.filter(l => !isLead(l))), callers: {}, cats: {}, log: day };
   day.forEach(l => {
-    const c = out.callers[l.caller] || (out.callers[l.caller] = { calls: 0, connected: 0, closed: 0, first: null, last: null });
-    c.calls++; if (l.call_status === 'Connected') c.connected++; if (l.done) c.closed++;
+    const c = out.callers[l.caller] || (out.callers[l.caller] = { calls: 0, connected: 0, interested: 0, closed: 0, hubVisits: 0, onboarded: 0, inProcess: [], first: null, last: null });
+    c.calls++; if (l.call_status === 'Connected') c.connected++; if (isInt(l)) c.interested++; if (l.done) c.closed++;
+    if (isVisit(l)) c.hubVisits++; if (isOnb(l)) c.onboarded++; if (isProc(l)) c.inProcess.push(procItem(l));
     const t = istTime(l.created_at); if (!c.first) c.first = t; c.last = t;
     const lc = logCat(l);
     const k = lc.cat === 'rent' || lc.cat === 'join' ? `${lc.cat}|${lc.tier}` : lc.cat === 'camp' ? `camp|${lc.anchor}` : lc.cat;
-    const g = out.cats[k] || (out.cats[k] = { cat: lc.cat, tier: lc.tier, campaign: lc.cat === 'camp' ? lc.anchor : null, calls: 0, connected: 0, closed: 0 });
-    g.calls++; if (l.call_status === 'Connected') g.connected++; if (l.done) g.closed++;
+    const g = out.cats[k] || (out.cats[k] = { cat: lc.cat, tier: lc.tier, campaign: lc.cat === 'camp' ? lc.anchor : null, calls: 0, connected: 0, interested: 0, closed: 0 });
+    g.calls++; if (l.call_status === 'Connected') g.connected++; if (isInt(l)) g.interested++; if (l.done) g.closed++;
   });
   const tally = list => { const o = {}; list.forEach(x => { if (x) o[x] = (o[x] || 0) + 1; }); return o; };
   const conn = day.filter(l => l.call_status === 'Connected');
@@ -1170,6 +1184,19 @@ function daySummary(ctx, date) {
   out.movedToRnr = Array.from(prefixes).filter(p => rnrInfo([p], upto, date).rnr && !rnrInfo([p], before, addDays(date, -1)).rnr)
     .map(p => { const l = day.filter(x => (x.item_keys || []).some(k => itemPrefix(k) === p)).pop(); return { prefix: p, name: l.driver_name, caller: l.caller }; });
   return out;
+}
+
+// WhatsApp summary, one block per caller then the team total
+function whatsappSummary(ds, label) {
+  const p2 = n => String(n).padStart(2, '0');
+  const block = (title, v) => {
+    const lines = [`*${title}*`, `Total Calls - ${v.calls}`, `Connected - ${p2(v.connected)}`, `Interested - ${p2(v.interested)}`,
+      `Hub Visit - ${p2(v.hubVisits)}`, `Onboard - ${p2(v.onboarded)}`, `In Process - ${p2(v.inProcess.length)}${v.inProcess.length ? ' pending' : ''}`];
+    v.inProcess.forEach(x => lines.push(`      ${x.name}  ${x.phone}  ${x.location || '-'}  ${x.label}`));
+    return lines.join('\n');
+  };
+  const callers = Object.entries(ds.callers).sort((a, b) => b[1].calls - a[1].calls);
+  return [`*Calling summary, ${label}*`].concat(callers.map(([k, v]) => block(k, v)), callers.length > 1 ? [block('Team total', ds.total)] : []).join('\n\n');
 }
 
 // ---------- results: did the call help? ----------
@@ -1356,7 +1383,7 @@ function leavesFor(driverId, name, ctx) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
-  LEAD_LOCATIONS, ONBOARDED_OUTCOME, normKdm, onboardedList, leadInfoFor, hashPick, ownerFor, assignOwners, firstCallerIndex, INCOMING_SOURCES, summaryDefaultDay, daySummary, logCat, istTime, sheetNameDate, parseJobHaiSheet, jobhaiNameFor, detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, FOLLOWUP_OUTCOMES, FOLLOWUP_KEEP, isInterestedOutcome, interestedState, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
+  IN_PROCESS_OUTCOME, VISITED_OUTCOMES, CARGO_CLIENTS, shortLocation, clientOf, LEAD_LOCATIONS, ONBOARDED_OUTCOME, normKdm, onboardedList, leadInfoFor, hashPick, ownerFor, assignOwners, firstCallerIndex, INCOMING_SOURCES, whatsappSummary, summaryDefaultDay, daySummary, logCat, istTime, sheetNameDate, parseJobHaiSheet, jobhaiNameFor, detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, FOLLOWUP_OUTCOMES, FOLLOWUP_KEEP, isInterestedOutcome, interestedState, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
   buildLeadIndex, campaignStats, rnrInfo, itemPrefix, existingDriver,
   LEAD_OUTCOMES, parseLeadForm, buildPhoneRent, leadOnboarded, phone10,
   SERVICE_OUTCOMES, MASTER_VEHICLES, parseServiceTracker, sheetDay, normReg, driversOnVehicle,
@@ -1887,7 +1914,7 @@ function openRow(rowKey, list) {
   S.lastOrder = list === 'rnr' ? (S.rnrOrder || []) : list === 'interested' ? (S.interestedOrder || []) : (S.queueOrder || []); S.lastList = list || 'queue';
   const savedCaller = lsGet('portalCaller');
   const rowNow = ((S.Q || buildQueue(ctx())).all || []).find(r => r.rowKey === rowKey);
-  S.current = { rowKey, form: { caller: rowNow && CALLERS.includes(rowNow.owner) ? rowNow.owner : (CALLERS.includes(savedCaller) ? savedCaller : ''), status: '', outcome: '', reason: '', location: rowNow && rowNow.location ? rowNow.location : '', comeback: '', comment: '', }, msg: '' };
+  S.current = { rowKey, form: { caller: CALLERS.includes(savedCaller) ? savedCaller : (rowNow && CALLERS.includes(rowNow.owner) ? rowNow.owner : ''), status: '', outcome: '', reason: '', location: rowNow && rowNow.location ? rowNow.location : '', comeback: '', comment: '', }, msg: '' };
   renderModal();
   document.getElementById('modal').classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -2002,7 +2029,7 @@ function renderModal() {
   const leaveHtml = leaves.length ? `<div class="sub-h">Leave on file</div><div class="tbl-wrap"><table class="hist"><tbody>${leaves.map(l => `<tr><td>${shortDate(l.startDate)} to ${shortDate(l.endDate)}</td><td>${esc(l.reason || '')}</td></tr>`).join('')}</tbody></table></div>` : '';
 
   const rowKeys = new Set(row.items.map(i => i.key));
-  const allLogs = S.logs.filter(l => (row.driverId && l.driver_id === row.driverId) || (l.item_keys || []).some(k => rowKeys.has(k)) || ((isCamp || isLead) && row.phone && (l.item_keys || []).some(k => ['camp', 'lead', 'inc'].some(p => k.startsWith(p + '|ph:' + row.phone + '|')))) || (!row.driverId && !isSvc && (l.driver_name || '').toLowerCase() === String(row.name).toLowerCase()));
+  const allLogs = S.logs.filter(l => (row.driverId && l.driver_id === row.driverId) || (l.item_keys || []).some(k => rowKeys.has(k)) || ((isCamp || isLead) && row.phone && (l.item_keys || []).some(k => ['camp', 'lead', 'inc'].some(p => k.startsWith(p + '|ph:' + row.phone + '|')))) || (!row.driverId && row.items[0].cat === 'exit' && (l.item_keys || []).some(k => rowKeys.has(k))));
   const logLabelBadges = l => (l.item_keys || []).map(k => { const p = k.split('|'); return keyBadge(p[0], p[3] ? Number(p[3]) : null, p[2]); }).join('');
   const histHtml = `<div class="sub-h" style="margin-top:0;">Previous calls with this ${row.driverId ? 'driver' : 'number'}${allLogs.length ? ` (${allLogs.length})` : ''}</div>` + (allLogs.length
     ? `<div class="tbl-wrap" style="margin-bottom:14px;"><div class="tbl-scroll"><table class="hist"><thead><tr><th>When</th><th>Call about</th><th>By</th><th>Status</th><th>Outcome / reason</th><th>Remark</th></tr></thead><tbody>${allLogs.slice().reverse().map(l => `<tr><td style="white-space:nowrap;">${callTime(l.created_at)}${l.done ? ' <span class="badge b-ok">done</span>' : ''}</td><td>${logLabelBadges(l)}</td><td>${esc(l.caller)}</td><td>${esc(l.call_status)}</td><td>${esc([l.outcome, l.comeback_date ? 'on ' + shortDate(l.comeback_date) : null, l.reason].filter(Boolean).join(', ') || '-')}</td><td style="min-width:200px;">${esc(l.comment || '')}</td></tr>`).join('')}</tbody></table></div></div>`
@@ -2013,12 +2040,14 @@ function renderModal() {
   const opt = (list, val, ph) => `<option value="">${esc(ph)}</option>` + list.map(x => `<option ${x === val ? 'selected' : ''}>${esc(x)}</option>`).join('');
   const form = `<div class="log-form">
     <div class="sub-h" style="margin-top:0;">Log this call</div>
+    ${row.owner ? `<div class="driver-sub" style="font-size:12px; margin:-4px 0 10px;">Assigned to ${esc(row.owner)}. Pick who is actually calling: the person who saves the call takes it over.</div>` : ''}
     <div class="form-grid">
       <div class="field"><label>Called by</label><div class="seg">${CALLERS.map(c => `<button type="button" class="${f.caller === c ? 'on' : ''}" onclick="setForm('caller','${c}')">${c}</button>`).join('')}</div></div>
       <div class="field"><label for="fStatus">Call status</label><select id="fStatus" onchange="setForm('status', this.value)">${opt(CALL_STATUSES, f.status, 'Choose status')}</select></div>
       ${connected ? `
       <div class="field"><label for="fOutcome">${isSvc ? 'Service feedback' : 'Outcome'}</label><select id="fOutcome" onchange="setForm('outcome', this.value)">${opt(isSvc ? SERVICE_OUTCOMES : row.interested ? FOLLOWUP_OUTCOMES : isCamp ? CAMP_OUTCOMES : isLead ? LEAD_OUTCOMES : OUTCOMES, f.outcome, isSvc ? 'Choose feedback' : 'Choose outcome')}</select></div>
       ${(isLead || isCamp) && isInterestedOutcome(f.outcome) ? `<div class="field"><label for="fLoc">Location (hub)</label><select id="fLoc" onchange="setForm('location', this.value)"><option value="">Choose hub</option>${LEAD_LOCATIONS.map(x => `<option ${f.location === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>` : ''}
+      ${(isLead || isCamp) && f.outcome === IN_PROCESS_OUTCOME && /^Cargo/.test(f.location || '') ? `<div class="field"><label for="fClient">Client</label><select id="fClient" onchange="setForm('client', this.value)"><option value="">Choose client</option>${CARGO_CLIENTS.map(x => `<option ${f.client === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>` : ''}
       ${(isLead || isCamp) && f.outcome === ONBOARDED_OUTCOME ? `<div class="field"><label for="fSeg">Onboarded as</label><select id="fSeg" onchange="setForm('reason', this.value)"><option value="">Choose</option>${['Passenger', 'Cargo'].map(x => `<option ${f.reason === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>` : ''}
       ${isSvc || isLead || isCamp ? '' : `<div class="field"><label for="fReason">Main reason (if not driving or not paying)</label><select id="fReason" onchange="setForm('reason', this.value)">${opt(REASONS, f.reason, 'None / not applicable')}</select></div>`}
       ${dateLabel(f.outcome, isCamp || isLead) ? `<div class="field"><label for="fBack">${dateLabel(f.outcome, isCamp || isLead)}${dateRequired(f.outcome) ? '' : ' (optional)'}</label><input type="date" id="fBack" value="${esc(f.comeback)}" min="${S.today}" onchange="setForm('comeback', this.value)"></div>` : ''}
@@ -2069,12 +2098,13 @@ async function saveCall() {
   if (!(f.comment || '').trim()) return fail('Write a remark before saving.');
   const leadRow = row.items.some(i => LEAD_CATS.includes(i.cat));
   if (leadRow && f.status === 'Connected' && isInterestedOutcome(f.outcome) && !LEAD_LOCATIONS.includes(f.location)) return fail('Choose the hub location.');
+  if (leadRow && f.outcome === IN_PROCESS_OUTCOME && /^Cargo/.test(f.location || '') && !CARGO_CLIENTS.includes(f.client)) return fail('Choose the client.');
   if (leadRow && f.outcome === ONBOARDED_OUTCOME && !['Passenger', 'Cargo'].includes(f.reason)) return fail('Choose if they joined passenger or cargo.');
   if (leadRow && dateRequired(f.outcome) && !f.comeback) return fail(f.outcome === CAMP_SNOOZE_OUTCOME ? 'Pick the call-back date.' : 'Pick the visit date.');
   const btn = document.getElementById('saveBtn'); btn.disabled = true; btn.textContent = 'Saving…';
   const rec = {
     driver_id: row.driverId, driver_name: row.driverId ? row.name : (row.items[0].cat === 'svc' ? row.items[0].vehicle : row.name), hub: row.hub, phone: row.phone,
-    item_keys: row.items.map(i => i.key), item_labels: row.items.map(itemLabel),
+    item_keys: row.items.map(i => i.key), item_labels: row.items.map(itemLabel).concat(leadRow && f.status === 'Connected' && f.outcome === IN_PROCESS_OUTCOME && /^Cargo/.test(f.location || '') && f.client ? ['Client: ' + f.client] : []),
     caller: f.caller, call_status: f.status, outcome: f.outcome || null,
     reason: (leadRow && f.status === 'Connected' && isInterestedOutcome(f.outcome)) ? f.location : (f.reason || null),
     comeback_date: f.comeback || null, comment: (f.comment || '').trim(), done: f.status === 'Connected' && !(leadRow && isInterestedOutcome(f.outcome)),
@@ -2474,8 +2504,18 @@ function renderDaily() {
     return e.length ? `<div class="bars">${e.map(([k, v]) => `<div class="bar-row"><span>${esc(k)}</span><div class="bar-bg"><div class="bar-fill" style="width:${v / max * 100}%"></div></div><span class="mono" style="text-align:right;">${v}</span></div>`).join('')}</div>` : '<div class="driver-sub" style="font-size:12.5px;">None.</div>';
   };
   const people = (arr, fmt) => arr.length ? `<ul style="margin:6px 0 0 18px; padding:0; font-size:13px; line-height:1.6;">${arr.map(x => `<li>${fmt(x)}</li>`).join('')}</ul>` : '<div class="driver-sub" style="font-size:12.5px;">None.</div>';
+  // Today so far, shown above any earlier day
+  let todayStrip = '';
+  if (day !== S.today) {
+    const td = daySummary(ctx(), S.today);
+    const tc = Object.entries(td.callers).map(([k, v]) => `${esc(k)} ${v.calls} calls, ${v.connected} connected, ${v.interested} interested`).join(' · ');
+    todayStrip = `<div class="card" style="margin-bottom:16px; padding:12px 16px;"><div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px;">
+      <h3 style="margin:0;">Today so far</h3><button class="filter-btn" onclick="S.dailyDay=S.today; renderDaily();">Open today</button></div>
+      <div class="mono" style="font-size:13px; margin-top:6px;">Calls ${td.total.calls} · Connected ${td.total.connected} · Interested ${td.total.interested} · Closed ${td.total.closed}</div>
+      ${tc ? `<div class="driver-sub" style="font-size:12px; margin-top:4px;">${tc}</div>` : ''}</div>`;
+  }
   if (!ds.total.calls) {
-    document.getElementById('dailyBody').innerHTML = `<div class="tbl-wrap"><div class="empty">No calls were logged on ${esc(dayLabel(day))}. Use the arrows to look at another day.</div></div>`;
+    document.getElementById('dailyBody').innerHTML = todayStrip + `<div class="tbl-wrap"><div class="empty">No calls were logged on ${esc(dayLabel(day))}. Use the arrows to look at another day.</div></div>`;
     return;
   }
   const isLatest = day === summaryDefaultDay(S.today);
@@ -2485,24 +2525,26 @@ function renderDaily() {
   const q = S.Q || buildQueue(ctx());
   const filt = S.dailyCaller || null;
   const logRows = ds.log.filter(l => !filt || l.caller === filt).slice().reverse();
-  document.getElementById('dailyBody').innerHTML = `
-    <div class="summary-row">
+  document.getElementById('dailyBody').innerHTML = todayStrip + `
+    <div class="summary-row" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));">
       ${card('Calls made', ds.total.calls, `${ds.total.people} people · leads ${ds.leads.calls}, drivers ${ds.drivers.calls}`)}
       ${card('Connected', ds.total.connected + pct(ds.total.connected, ds.total.calls), `leads ${ds.leads.connected}, drivers ${ds.drivers.connected}`)}
+      ${card('Interested', ds.total.interested, `leads marked interested or still interested`)}
       ${card('Closed', ds.total.closed, 'connected with a remark, moved to Done')}
       ${card('Results', ds.cameBack.length + ds.converted.length, `${ds.cameBack.length} drivers paid after a call, ${ds.converted.length} leads converted`)}
     </div>
     <div class="section grid2">
-      <div class="card"><h3>By caller</h3><div class="tbl-wrap"><table><thead><tr><th>Caller</th><th class="num">Calls</th><th class="num">Connected</th><th class="num">Closed</th><th class="num">First</th><th class="num">Last</th></tr></thead><tbody>
-        ${callers.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v.calls}</td><td class="num">${v.connected} <span class="driver-sub">${Math.round(v.connected / v.calls * 100)}%</span></td><td class="num">${v.closed}</td><td class="num">${v.first}</td><td class="num">${v.last}</td></tr>`).join('')}
+      <div class="card"><h3>By caller</h3><div class="tbl-wrap"><table><thead><tr><th>Caller</th><th class="num">Calls</th><th class="num">Connected</th><th class="num">Interested</th><th class="num">Closed</th><th class="num">First</th><th class="num">Last</th></tr></thead><tbody>
+        ${callers.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v.calls}</td><td class="num">${v.connected} <span class="driver-sub">${Math.round(v.connected / v.calls * 100)}%</span></td><td class="num">${v.interested}</td><td class="num">${v.closed}</td><td class="num">${v.first}</td><td class="num">${v.last}</td></tr>`).join('')}
       </tbody></table></div></div>
-      <div class="card"><h3>By call type</h3><div class="tbl-wrap"><table><thead><tr><th>Type</th><th class="num">Calls</th><th class="num">Connected</th><th class="num">Closed</th></tr></thead><tbody>
-        ${cats.map(g => `<tr><td>${esc(catLabel(g))}</td><td class="num">${g.calls}</td><td class="num">${g.connected}</td><td class="num">${g.closed}</td></tr>`).join('')}
+      <div class="card"><h3>By call type</h3><div class="tbl-wrap"><table><thead><tr><th>Type</th><th class="num">Calls</th><th class="num">Connected</th><th class="num">Interested</th><th class="num">Closed</th></tr></thead><tbody>
+        ${cats.map(g => `<tr><td>${esc(catLabel(g))}</td><td class="num">${g.calls}</td><td class="num">${g.connected}</td><td class="num">${g.interested}</td><td class="num">${g.closed}</td></tr>`).join('')}
       </tbody></table></div></div>
     </div>
     <div class="section grid2">
       <div class="card"><h3>New leads said</h3>${bars(ds.leadOutcomes)}
         <div class="sub-h">Hub visits promised</div>${people(ds.hubVisits, l => `${esc(l.driver_name)}, ${l.comeback_date ? 'on ' + esc(shortDate(l.comeback_date)) : 'no date'} <span class="driver-sub">(${esc(l.caller)})</span>`)}
+        <div class="sub-h">In process</div>${people(ds.total.inProcess, x => `${esc(x.name)} <span class="driver-sub">${esc(x.phone)}, ${esc(x.location || '-')}, ${esc(x.label)}</span>`)}
         <div class="sub-h">Call-backs booked</div>${people(ds.callbacks, l => `${esc(l.driver_name)}, ${l.comeback_date ? 'on ' + esc(shortDate(l.comeback_date)) : 'no date'} <span class="driver-sub">(${esc(l.caller)})</span>`)}</div>
       <div class="card"><h3>Existing drivers said</h3>${bars(ds.driverOutcomes)}
         <div class="sub-h">Reasons given</div>${bars(ds.reasons)}
@@ -2533,19 +2575,7 @@ function renderDaily() {
 }
 function dailyText() {
   const ds = S.dailySummary; if (!ds) return '';
-  const lines = [`*Calling summary, ${dayLabel(ds.date)}*`,
-    `Calls: ${ds.total.calls} (${ds.total.people} people), connected ${ds.total.connected}${ds.total.calls ? ' (' + Math.round(ds.total.connected / ds.total.calls * 100) + '%)' : ''}, closed ${ds.total.closed}`,
-    `New leads: ${ds.leads.calls} calls, ${ds.leads.connected} connected. Existing drivers: ${ds.drivers.calls} calls, ${ds.drivers.connected} connected`];
-  Object.entries(ds.callers).forEach(([k, v]) => lines.push(`${k}: ${v.calls} calls, ${v.connected} connected, ${v.first} to ${v.last}`));
-  const top = o => Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ');
-  if (Object.keys(ds.leadOutcomes).length) lines.push(`Leads said: ${top(ds.leadOutcomes)}`);
-  if (Object.keys(ds.driverOutcomes).length) lines.push(`Drivers said: ${top(ds.driverOutcomes)}`);
-  if (Object.keys(ds.reasons).length) lines.push(`Reasons: ${top(ds.reasons)}`);
-  lines.push(`Paid rent after a call: ${ds.cameBack.length}${ds.cameBack.length ? ' (' + ds.cameBack.map(x => x.name).join(', ') + ')' : ''}`);
-  lines.push(`Leads converted: ${ds.converted.length}${ds.converted.length ? ' (' + ds.converted.map(x => x.name || x.phone).join(', ') + ')' : ''}`);
-  if (ds.hubVisits.length) lines.push(`Hub visits promised: ${ds.hubVisits.map(l => l.driver_name + (l.comeback_date ? ' ' + shortDate(l.comeback_date) : '')).join(', ')}`);
-  if (ds.movedToRnr.length) lines.push(`Moved to RNR: ${ds.movedToRnr.length}`);
-  return lines.join('\n');
+  return whatsappSummary(ds, (ds.date === S.today ? 'today so far, ' : '') + dayLabel(ds.date));
 }
 async function copyDaily() {
   const msg = document.getElementById('copyMsg');
