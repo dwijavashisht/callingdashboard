@@ -129,6 +129,7 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
 /* modal */
 .modal-overlay{display:none; position:fixed; inset:0; background:rgba(20,22,20,0.45); z-index:100; align-items:flex-start; justify-content:center; padding:4vh 16px;}
 .modal-overlay.open{display:flex;}
+#cmodal .modal-box{width:min(1200px,100%);}
 .modal-box{background:var(--panel); border-radius:16px; border:1px solid var(--line); width:min(880px,100%); max-height:92vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.25);}
 .modal-head{display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:18px 22px; border-bottom:1px solid var(--line);}
 .modal-head h3{font-size:22px; font-weight:600;}
@@ -1199,6 +1200,35 @@ function whatsappSummary(ds, label) {
   return [`*Calling summary, ${label}*`].concat(callers.map(([k, v]) => block(k, v)), callers.length > 1 ? [block('Team total', ds.total)] : []).join('\n\n');
 }
 
+// Every lead of one campaign with where it stands now and its latest call, for the summary popup.
+// Stage: fresh, tried, rnr, interested, onboarded, closed, duplicate (first in another list),
+// existing (already a Kadam driver).
+function campaignLeadRows(cp, ctx, q) {
+  const LI = ctx.leadIndex || buildLeadIndex(ctx);
+  const rowByPhone = {}; ((q && q.all) || []).forEach(r => { if (r.phone) rowByPhone[phone10(r.phone)] = r; });
+  const logsByPhone = {};
+  (ctx.logs || []).forEach(l => (l.item_keys || []).forEach(k => { const m = k.match(/^(?:lead|camp|inc)\|ph:(\d{10})\|/); if (m) { const a = logsByPhone[m[1]] || (logsByPhone[m[1]] = []); if (!a.includes(l)) a.push(l); } }));
+  const onb = {}; onboardedList(ctx).forEach(e => { onb[e.phone] = e; });
+  return ((cp.parsed && cp.parsed.leads) || []).map(l => {
+    const logs = (logsByPhone[l.phone] || []).slice().sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+    const last = logs[logs.length - 1] || null;
+    const lastConn = logs.filter(x => x.call_status === 'Connected').pop() || null;
+    const r = rowByPhone[l.phone] || null;
+    const pr = LI.primary[l.phone];
+    const date = campLeadDate(cp, l);
+    const base = { name: l.name, phone: l.phone, leadDate: date, tries: logs.length, last, lastConn, owner: r ? r.owner : (last ? last.caller : null),
+      rowKey: r ? r.rowKey : null, list: r ? (r.rnr ? 'rnr' : r.interested ? 'interested' : 'queue') : null, location: (r && r.location) || (lastConn && LEAD_LOCATIONS.includes(lastConn.reason) ? lastConn.reason : null) };
+    if (pr && pr.src !== cp.id) return { ...base, stage: 'duplicate', detail: 'First in ' + (pr.src === 'insta' ? 'Instagram form' : pr.incoming ? 'an incoming call' : (pr.campaign ? pr.campaign.name : 'another list')) };
+    if (existingDriver(l.phone, date, ctx.phoneRent)) return { ...base, stage: 'existing', detail: 'Already a Kadam driver: ' + ctx.phoneRent[l.phone].driver };
+    if (onb[l.phone]) return { ...base, stage: 'onboarded', detail: onb[l.phone].statusLabel };
+    if (r && r.rnr) return { ...base, stage: 'rnr', detail: `${r.unanswered} unanswered since ${fmtDay(r.unansweredSince)}` };
+    if (r && r.interested) return { ...base, stage: 'interested', detail: r.interestType + (r.visitDate ? ', visit ' + fmtDay(r.visitDate) : r.callbackDate ? ', call back ' + fmtDay(r.callbackDate) : ''), dueState: r.dueState };
+    if (r) return { ...base, stage: logs.length ? 'tried' : 'fresh', detail: logs.length ? `${logs.length} tr${logs.length === 1 ? 'y' : 'ies'}, not reached yet` : 'Not called yet' };
+    if (lastConn) return { ...base, stage: 'closed', detail: lastConn.outcome || 'Connected' };
+    return { ...base, stage: 'closed', detail: logs.length ? 'Closed' : 'Not in any list' };
+  });
+}
+
 // ---------- results: did the call help? ----------
 function firstTopupAfter(d, callIso) {
   if (!d) return null;
@@ -1383,7 +1413,7 @@ function leavesFor(driverId, name, ctx) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
-  IN_PROCESS_OUTCOME, VISITED_OUTCOMES, CARGO_CLIENTS, shortLocation, clientOf, LEAD_LOCATIONS, ONBOARDED_OUTCOME, normKdm, onboardedList, leadInfoFor, hashPick, ownerFor, assignOwners, firstCallerIndex, INCOMING_SOURCES, whatsappSummary, summaryDefaultDay, daySummary, logCat, istTime, sheetNameDate, parseJobHaiSheet, jobhaiNameFor, detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, FOLLOWUP_OUTCOMES, FOLLOWUP_KEEP, isInterestedOutcome, interestedState, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
+  IN_PROCESS_OUTCOME, VISITED_OUTCOMES, CARGO_CLIENTS, shortLocation, clientOf, LEAD_LOCATIONS, ONBOARDED_OUTCOME, normKdm, onboardedList, leadInfoFor, hashPick, ownerFor, assignOwners, firstCallerIndex, INCOMING_SOURCES, campaignLeadRows, whatsappSummary, summaryDefaultDay, daySummary, logCat, istTime, sheetNameDate, parseJobHaiSheet, jobhaiNameFor, detectSegment, CAMP_OUTCOMES, CAMP_SNOOZE_OUTCOME, FOLLOWUP_OUTCOMES, FOLLOWUP_KEEP, isInterestedOutcome, interestedState, RNR_DAYS, RNR_MIN_TRIES, cleanMobile, leadDay, parseCampaignSheet, campaignNameFor,
   buildLeadIndex, campaignStats, rnrInfo, itemPrefix, existingDriver,
   LEAD_OUTCOMES, parseLeadForm, buildPhoneRent, leadOnboarded, phone10,
   SERVICE_OUTCOMES, MASTER_VEHICLES, parseServiceTracker, sheetDay, normReg, driversOnVehicle,
@@ -2360,8 +2390,37 @@ function campaignSummaryHtml(cp) {
       ${cell('Connected', st.connected)}${cell('Interested', st.interested, 'ok')}${cell('Converted (paid rent)', st.converted, 'ok')}${cell('Connect rate', st.callable ? Math.round((st.connected / st.callable) * 100) + '%' : '-')}
     </div>
     ${outs.length ? `<div class="sub-h">What leads said</div><div class="tbl-wrap"><table class="hist"><tbody>${outs.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    <div class="sub-h">All leads</div>
+    <div class="filters" id="clChips-${cp.id}" style="margin-bottom:8px;"></div>
+    <input class="search" style="margin-bottom:8px; width:100%;" placeholder="Search name or phone" value="${esc((S.cm.leadSearch || {})[cp.id] || '')}" oninput="(S.cm.leadSearch = S.cm.leadSearch || {})['${cp.id}'] = this.value; renderCampLeadTable('${cp.id}')">
+    <div class="tbl-wrap"><div class="tbl-scroll" id="clTable-${cp.id}"></div></div>
     <div class="form-actions"><button class="primary" onclick="closeCModal(); showCampaignCalls('${cp.id}')">Show calls for ${esc(cp.name)}</button>
       ${cp.sheet_url ? `<a class="filter-btn" style="text-decoration:none;" href="${esc(cp.sheet_url)}" target="_blank" rel="noopener">Open sheet</a>` : ''}</div>`;
+}
+const CL_STAGES = [['fresh', 'Fresh', 'b-wait'], ['tried', 'Tried', 'b-rent3'], ['rnr', 'RNR', 'b-bad'], ['interested', 'Interested', 'b-join'],
+  ['onboarded', 'Onboarded', 'b-ok'], ['closed', 'Closed', 'b-wait'], ['duplicate', 'Duplicate', 'b-camp'], ['existing', 'Kadam driver', 'b-inc']];
+function renderCampLeadTable(id) {
+  const cp = S.campaigns.find(c => c.id === id); const el = document.getElementById('clTable-' + id);
+  if (!cp || !el || !cp.parsed) return;
+  const all = campaignLeadRows(cp, ctx(), S.Q || buildQueue(ctx()));
+  const f = (S.cm.leadStage || {})[id] || null;
+  document.getElementById('clChips-' + id).innerHTML = `<button class="filter-btn ${!f ? 'active' : ''}" onclick="(S.cm.leadStage = S.cm.leadStage || {})['${id}'] = null; renderCampLeadTable('${id}')">All ${all.length}</button>` +
+    CL_STAGES.filter(([k]) => all.some(x => x.stage === k)).map(([k, label]) => `<button class="filter-btn ${f === k ? 'active' : ''}" onclick="(S.cm.leadStage = S.cm.leadStage || {})['${id}'] = ${f === k ? 'null' : `'${k}'`}; renderCampLeadTable('${id}')">${label} ${all.filter(x => x.stage === k).length}</button>`).join('');
+  let rows = f ? all.filter(x => x.stage === f) : all;
+  const qv = (((S.cm.leadSearch || {})[id]) || '').trim().toLowerCase();
+  if (qv) rows = rows.filter(x => [x.name, x.phone].some(v => String(v || '').toLowerCase().includes(qv)));
+  if (!rows.length) { el.innerHTML = '<div class="empty">No leads here.</div>'; return; }
+  const st = Object.fromEntries(CL_STAGES.map(([k, l, c]) => [k, [l, c]]));
+  el.innerHTML = `<table class="hist"><thead><tr><th>Lead</th><th>Stage</th><th>Caller</th><th class="num">Tries</th><th>Last call</th><th>Remark</th><th>Location</th><th></th></tr></thead><tbody>` +
+    rows.map(x => `<tr>
+      <td><div class="driver-name">${esc(x.name || '-')}</div><div class="driver-sub">${esc(x.phone)}</div></td>
+      <td><span class="badge ${st[x.stage][1]}">${st[x.stage][0]}</span><div class="driver-sub">${esc(x.detail || '')}</div></td>
+      <td>${x.owner ? `<span class="owner owner-${Math.max(0, CALLERS.indexOf(x.owner))}">${esc(x.owner)}</span>` : '-'}</td>
+      <td class="num">${x.tries}</td>
+      <td style="white-space:nowrap; font-size:12px;">${x.last ? `${callTime(x.last.created_at)}<div class="driver-sub">${esc(x.last.caller)}, ${esc(x.last.call_status)}${x.last.outcome ? ', ' + esc(x.last.outcome) : ''}</div>` : '<span class="driver-sub">not called</span>'}</td>
+      <td style="font-size:12px; min-width:160px;">${esc(x.last && x.last.comment ? x.last.comment : '')}</td>
+      <td style="font-size:12px;">${x.location ? esc(shortLocation(x.location)) : '-'}</td>
+      <td>${x.rowKey ? `<button class="filter-btn" style="padding:4px 10px;" onclick="closeCModal(); openRow('${esc(x.rowKey)}', '${x.list}')">Open</button>` : ''}</td></tr>`).join('') + '</tbody></table>';
 }
 function renderCampaignSummary() {
   const cps = (S.cm.ids || []).map(id => S.campaigns.find(c => c.id === id)).filter(Boolean);
@@ -2371,10 +2430,12 @@ function renderCampaignSummary() {
     document.getElementById('cTitle').textContent = cps[0].name;
     document.getElementById('cSub').textContent = sub(cps[0]);
     document.getElementById('cBody').innerHTML = campaignSummaryHtml(cps[0]);
+    renderCampLeadTable(cps[0].id);
   } else {
     document.getElementById('cTitle').textContent = `${cps.length} campaigns added`;
     document.getElementById('cSub').textContent = cps.map(c => c.name).join(', ');
     document.getElementById('cBody').innerHTML = cps.map((cp, i) => `<div style="${i ? 'border-top:2px solid var(--ink); margin-top:20px; padding-top:14px;' : ''}"><h3 style="font-size:20px;">${esc(cp.name)}</h3><div class="modal-sub" style="margin-bottom:12px;">${esc(sub(cp))}</div>${campaignSummaryHtml(cp)}</div>`).join('');
+    cps.forEach(cp => renderCampLeadTable(cp.id));
   }
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.cm) closeCModal(); });
