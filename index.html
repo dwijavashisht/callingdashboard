@@ -279,7 +279,7 @@ button.ghost{background:transparent; color:var(--ink-dim); border:1px solid var(
     <div class="kpis" id="obKpis" style="grid-template-columns:repeat(4,1fr);"></div>
   </div>
   <div class="section">
-    <div class="section-head"><h2>Check</h2><div class="filters"><input class="search" id="obSearch" placeholder="Search name, phone or KDM ID" oninput="renderOnboarded()"></div></div>
+    <div class="section-head"><h2>Check</h2><div class="filters"><span id="obSeg"></span><input class="search" id="obSearch" placeholder="Search name, phone or KDM ID" oninput="renderOnboarded()"></div></div>
     <div class="tbl-wrap"><div class="tbl-scroll" id="obTable"></div></div>
     <div class="note" style="margin-top:8px;">Passenger: checked automatically against rent paid from the lead's number (or from the KDM ID if entered). Cargo: enter the driver's KDM ID to confirm. Passenger leads who paid rent without being marked are added here automatically.</div>
   </div>
@@ -1833,9 +1833,13 @@ function renderInterested() {
 }
 function renderOnboarded() {
   if (!S.today) return;
-  const all = onboardedList(ctx());
-  S.obList = all;
-  document.getElementById('cntOnboarded').textContent = all.length;
+  const full = onboardedList(ctx());
+  S.obList = full;
+  document.getElementById('cntOnboarded').textContent = full.length;
+  const seg = S.obSeg || null;
+  document.getElementById('obSeg').innerHTML = [[null, 'All'], ['Passenger', 'Passenger'], ['Cargo', 'Cargo']].map(([v, l]) =>
+    `<button class="filter-btn ${seg === v ? 'active' : ''}" onclick="S.obSeg=${v ? `'${v}'` : 'null'}; renderOnboarded();">${l} <span style="opacity:.7;">${v ? full.filter(e => e.segment === v).length : full.length}</span></button>`).join(' ');
+  const all = seg ? full.filter(e => e.segment === seg) : full;
   const groups = [['needs-id', 'KDM ID needed', 'c-rose'], ['pending', 'Waiting for rent', 'c-amber'], ['verified', 'Verified', 'c-teal'], [null, 'All onboarded', 'c-blue']];
   document.getElementById('obKpis').innerHTML = groups.map(([g, label, cls]) => {
     const on = (S.obFilter || null) === g;
@@ -1845,7 +1849,7 @@ function renderOnboarded() {
   const qv = (document.getElementById('obSearch').value || '').trim().toLowerCase();
   if (qv) rows = rows.filter(e => [e.name, e.phone, e.kdm].some(x => String(x || '').toLowerCase().includes(qv)));
   const el = document.getElementById('obTable');
-  if (!rows.length) { el.innerHTML = '<div class="empty">Nobody here yet. Mark a lead "Onboarded" from the call page.</div>'; return; }
+  if (!rows.length) { el.innerHTML = `<div class="empty">${full.length ? 'Nobody matches this filter.' : 'Nobody here yet. Mark a lead "Onboarded" from the call page.'}</div>`; return; }
   const savedCaller = lsGet('portalCaller');
   const cls = { verified: 'b-ok', pending: 'b-rent3', 'needs-id': 'b-bad' };
   el.innerHTML = `<table><thead><tr><th>Lead</th><th>Phone</th><th>Segment</th><th class="hide-sm">Source</th><th>Onboarded</th><th>Check</th><th>KDM ID</th></tr></thead><tbody>` +
