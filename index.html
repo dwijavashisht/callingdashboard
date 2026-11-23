@@ -2519,13 +2519,13 @@ function renderIncoming(focusKey) {
   const opt = (list, val, ph) => `<option value="">${esc(ph)}</option>` + list.map(x => `<option ${x === val ? 'selected' : ''}>${esc(x)}</option>`).join('');
   document.getElementById('cBody').innerHTML = `
     <div class="form-grid">
+      <div class="field full" style="background:var(--bg-soft, rgba(0,0,0,.03)); padding:10px 12px; border-radius:8px;"><label for="iSource">Where did they get our number? (required)</label><select id="iSource" onchange="incSet('source', this.value, true)">${opt(INCOMING_SOURCES, f.source, 'Choose where the call came from')}</select>
+        ${f.source === 'Others' ? `<input type="text" id="iOther" style="margin-top:8px;" placeholder="Type where they saw our number" value="${esc(f.sourceOther)}" oninput="incSet('sourceOther', this.value)">` : ''}</div>
       <div class="field"><label for="iPhone">Phone number</label><input type="text" id="iPhone" inputmode="tel" value="${esc(f.phone)}" placeholder="10-digit mobile" oninput="incSet('phone', this.value, true)">
         ${f.phone && !phone ? '<div class="hint" style="color:var(--rose);">Enter a 10-digit mobile number</div>' : ''}</div>
       <div class="field"><label for="iName">Name</label><input type="text" id="iName" value="${esc(f.name)}" oninput="incSet('name', this.value)"></div>
       ${note ? `<div class="field full"><div class="banner warn" style="margin:0;">${esc(note)} It will still be saved.</div></div>` : ''}
-      <div class="field"><label for="iSource">How did they hear about us?</label><select id="iSource" onchange="incSet('source', this.value, true)">${opt(INCOMING_SOURCES, f.source, 'Choose source')}</select></div>
-      ${f.source === 'Others' ? `<div class="field"><label for="iOther">Which source?</label><input type="text" id="iOther" value="${esc(f.sourceOther)}" oninput="incSet('sourceOther', this.value)"></div>` : `<div class="field"><label for="iInterest">Interested in</label><select id="iInterest" onchange="incSet('interest', this.value)">${opt(['Passenger', 'Cargo', 'Not sure'], f.interest, 'Choose')}</select></div>`}
-      ${f.source === 'Others' ? `<div class="field"><label for="iInterest">Interested in</label><select id="iInterest" onchange="incSet('interest', this.value)">${opt(['Passenger', 'Cargo', 'Not sure'], f.interest, 'Choose')}</select></div>` : ''}
+      <div class="field"><label for="iInterest">Interested in</label><select id="iInterest" onchange="incSet('interest', this.value)">${opt(['Passenger', 'Cargo', 'Not sure'], f.interest, 'Choose')}</select></div>
       <div class="field"><label for="iArea">Area or city</label><input type="text" id="iArea" value="${esc(f.area)}" placeholder="e.g. Sector 68, Gurgaon" oninput="incSet('area', this.value)"></div>
       <div class="field"><label>Call taken by</label><div class="seg">${CALLERS.map(c => `<button type="button" class="${f.caller === c ? 'on' : ''}" onclick="incSet('caller','${c}', true)">${c}</button>`).join('')}</div></div>
       <div class="field"><label for="iOutcome">Outcome</label><select id="iOutcome" onchange="incSet('outcome', this.value, true)">${opt(CAMP_OUTCOMES, f.outcome, 'Choose outcome')}</select></div>
@@ -2543,7 +2543,7 @@ async function saveIncoming() {
   const fail = msg => { m.msg = msg; m.msgCls = 'err'; renderIncoming(); };
   const phone = cleanMobile(f.phone);
   if (!phone) return fail('Enter a valid 10-digit mobile number.');
-  if (!f.source) return fail('Choose how they heard about us.');
+  if (!f.source) return fail('Choose where they got our number.');
   if (f.source === 'Others' && !f.sourceOther.trim()) return fail('Type the source.');
   if (!f.caller) return fail('Choose who took the call.');
   if (!f.outcome) return fail('Choose the outcome.');
