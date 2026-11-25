@@ -1607,6 +1607,51 @@ async function loadCampaigns() {
   }));
 }
 
+// New tabs in a Meta sheet that is already in the portal become campaigns on their own. A tab is
+// added once it has a phone column and at least one lead; tabs of campaigns that were removed are
+// never added back. Segment: from the tab name and questions, else the same as the sheet's other tabs.
+async function addNewSheetTabs() {
+  if (!sb || !SHEETS_API_KEY || S.autoTabBusy || !S.today) return 0;
+  S.autoTabBusy = true;
+  try {
+    const metaOf = r => { try { return JSON.parse(r.comment || '{}'); } catch (e) { return {}; } };
+    const sheetIds = [...new Set(S.campaigns.filter(c => c.kind !== 'jobhai' && c.sheet_id).map(c => c.sheet_id))];
+    const found = [];
+    for (const id of sheetIds) {
+      let tabs; try { tabs = await listSheetTabs(id); } catch (e) { continue; }
+      if (!tabs) continue;
+      const known = new Set((S.campaignRows || []).map(metaOf).filter(m => m.sheet_id === id).map(m => String(m.gid || '0')));
+      for (const tb of tabs) {
+        if (known.has(String(tb.gid))) continue;
+        let parsed; try { parsed = parseCampaignSheet(await fetchSheetRows(id, tb.gid), S.today); } catch (e) { continue; }
+        if (!parsed.headerFound || !parsed.leads.length) continue;
+        const sibs = S.campaigns.filter(c => c.sheet_id === id && c.segment).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+        const segment = detectSegment(tb.title, parsed.headers) || (sibs[0] && sibs[0].segment) || 'Passenger';
+        found.push({ id, gid: String(tb.gid), title: tb.title, segment });
+      }
+    }
+    if (!found.length) return 0;
+    // re-check against the latest rows, so two open portals don't both add the same tab
+    await loadLogs();
+    const have = new Set((S.campaignRows || []).map(metaOf).map(m => m.sheet_id + '|' + String(m.gid || '0')));
+    const names = (S.campaignRows || []).map(r => r.driver_name).filter(Boolean);
+    const added = [];
+    for (const t of found) {
+      if (have.has(t.id + '|' + t.gid)) continue;
+      const name = campaignNameFor(t.title, S.today, names.concat(added.map(a => a.name)));
+      const { error } = await sb.from(CALLS_TABLE).insert({ driver_name: name, caller: CAMPAIGN_CALLER, call_status: CAMPAIGN_MARK, done: false,
+        item_keys: ['campaign|' + name], item_labels: ['Campaign: ' + name],
+        comment: JSON.stringify({ sheet_url: `https://docs.google.com/spreadsheets/d/${t.id}/edit#gid=${t.gid}`, sheet_id: t.id, gid: t.gid, tab_name: t.title, segment: t.segment, auto: true }) });
+      if (!error) added.push({ name, title: t.title, segment: t.segment });
+    }
+    if (added.length) {
+      S.autoAdded = (S.autoAdded || []).concat(added);
+      await loadLogs(); await loadCampaigns();
+    }
+    return added.length;
+  } finally { S.autoTabBusy = false; }
+}
+
 async function loadLogs() {
   // Supabase returns at most 1,000 rows per request, so read the table in pages. Without this the
   // newest calls (and newly added campaigns) silently went missing once the table passed 1,000 rows.
@@ -1643,6 +1688,7 @@ async function refreshAll(manual) {
     await loadLeads();
     await loadLogs();
     await loadCampaigns();
+    try { await addNewSheetTabs(); } catch (e) { console.error(e); }
     S.loadError = null;
   } catch (e) {
     console.error(e);
@@ -2218,7 +2264,7 @@ function renderCampaigns() {
         <td class="num">${st.callable}</td><td class="num">${st.fresh}</td><td class="num hide-sm">${st.tried}</td><td class="num hide-sm">${st.rnr}</td>
         <td class="num">${st.connected}</td><td class="num">${st.interested}</td><td class="num"><b>${st.converted}</b></td>
         <td style="white-space:nowrap;"><button class="filter-btn" onclick="openCampaignSummary('${cp.id}')">Summary</button> <button class="filter-btn" onclick="showCampaignCalls('${cp.id}')">Calls</button> <button class="filter-btn" onclick="removeCampaign('${cp.id}')">Remove</button></td></tr>`;
-    }).join('') + '</tbody></table></div></div><div class="note" style="margin-top:8px;">Leads = new numbers to call, after removing invalid numbers, duplicates and existing Kadam drivers. Converted = the number paid rent on or after the lead date.' + (S.sheetsReadAt ? ` Meta sheets last read at ${callTime(S.sheetsReadAt)}; they are re-read every 5 minutes.` : '') + (S.hiddenDuplicateCampaigns ? ` ${S.hiddenDuplicateCampaigns} repeated upload${S.hiddenDuplicateCampaigns === 1 ? '' : 's'} of the same sheet ${S.hiddenDuplicateCampaigns === 1 ? 'is' : 'are'} hidden.` : '') + '</div>';
+    }).join('') + '</tbody></table></div></div><div class="note" style="margin-top:8px;">Leads = new numbers to call, after removing invalid numbers, duplicates and existing Kadam drivers. Converted = the number paid rent on or after the lead date.' + (S.sheetsReadAt ? ` Meta sheets last read at ${callTime(S.sheetsReadAt)}; they are re-read every 5 minutes.` : '') + (S.autoAdded && S.autoAdded.length ? ` New tab${S.autoAdded.length === 1 ? '' : 's'} added on their own: ${S.autoAdded.map(a => `${esc(a.title)} as ${esc(a.name)} (${esc(a.segment)})`).join(', ')}.` : '') + ' New tabs in these sheets are added as campaigns automatically.' + (S.hiddenDuplicateCampaigns ? ` ${S.hiddenDuplicateCampaigns} repeated upload${S.hiddenDuplicateCampaigns === 1 ? '' : 's'} of the same sheet ${S.hiddenDuplicateCampaigns === 1 ? 'is' : 'are'} hidden.` : '') + '</div>';
 }
 // Removing adds a "Campaign removed" entry; the campaign and its open lead calls disappear.
 // Calls already made stay in Done and in each number's history, and a closed lead is not called
@@ -2873,6 +2919,7 @@ async function refreshLeadSheets() {
   if (!sb) return;
   try {
     await loadLeads(); await loadCampaigns();
+    try { await addNewSheetTabs(); } catch (e) { console.error(e); }
     if (!S.current && !S.cm) renderAll();
     else { S.leadIndex = buildLeadIndex({ leads: S.leads, campaigns: S.campaigns.filter(c => c.parsed), incoming: S.incoming || [] }); S.Q = buildQueue(ctx()); renderQueue(); renderInterested(); renderOnboarded(); renderRnr(); renderCampaigns(); }
   } catch (e) {}
