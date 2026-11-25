@@ -1549,10 +1549,7 @@ async function loadServices() {
 // Instagram lead form responses (Google Form), read live like the service tracker
 async function loadLeads() {
   try {
-    const url = `https://docs.google.com/spreadsheets/d/${LEAD_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${LEAD_SHEET_GID}&_=${Date.now()}`;
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    S.leads = parseLeadForm(parseCSVText(await res.text())); S.leadError = null;
+    S.leads = parseLeadForm(await fetchSheetRows(LEAD_SHEET_ID, LEAD_SHEET_GID)); S.leadError = null;
   } catch (e) {
     S.leads = []; S.leadError = 'Could not load the Instagram lead form sheet (' + (e.message || e) + '). Lead calls are not shown.';
   }
@@ -1577,7 +1574,29 @@ function sheetRef(url) {
   const gid = (String(url).match(/[#&?]gid=(\d+)/) || [])[1] || '0';
   return id ? { id, gid } : null;
 }
+// Reads a tab as the text people see in the sheet. Google's gviz CSV guesses one type per column and
+// blanks out cells of the other type: a phone column of mostly numbers drops numbers typed as text
+// (e.g. "p:+918941936414" in newer Meta exports). So read through the Sheets API when the key is
+// set, and fall back to gviz only if that fails.
+const _tabTitles = {};
+async function sheetTabTitle(sheetId, gid) {
+  const c = _tabTitles[sheetId];
+  if (c && Date.now() - c.at < 60000 && c.map[String(gid)] !== undefined) return c.map[String(gid)];
+  const tabs = await listSheetTabs(sheetId);
+  _tabTitles[sheetId] = { at: Date.now(), map: Object.fromEntries((tabs || []).map(t => [String(t.gid), t.title])) };
+  return _tabTitles[sheetId].map[String(gid)];
+}
 async function fetchSheetRows(sheetId, gid) {
+  if (SHEETS_API_KEY) {
+    try {
+      const title = await sheetTabTitle(sheetId, gid);
+      if (title !== undefined) {
+        const range = encodeURIComponent("'" + title.replace(/'/g, "''") + "'");
+        const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?valueRenderOption=FORMATTED_VALUE&key=${encodeURIComponent(SHEETS_API_KEY)}&_=${Date.now()}`, { cache: 'no-store' });
+        if (r.ok) { const j = await r.json(); return (j.values || []).map(row => row.map(x => x === null || x === undefined ? '' : String(x))); }
+      }
+    } catch (e) { /* fall back to gviz below */ }
+  }
   const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}&_=${Date.now()}`, { cache: 'no-store' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const text = await res.text();
